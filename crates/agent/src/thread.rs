@@ -763,15 +763,6 @@ pub struct SiblingThreadRequest {
     /// Optional model override, as `provider/model-id`.
     /// Defaults to the user's configured default model for the agent.
     pub model: Option<String>,
-    /// Whether to create the thread in a new git worktree workspace.
-    pub use_new_worktree: bool,
-    /// Optional worktree directory name. When `None`, the UI generates a
-    /// random non-colliding name (matching the manual "Create worktree"
-    /// flow). Only relevant when `use_new_worktree` is true.
-    pub worktree_name: Option<String>,
-    /// Git ref (branch, tag, or commit) to base the new worktree on.
-    /// Only relevant when `use_new_worktree` is true.
-    pub base_ref: Option<String>,
 }
 
 /// Information returned when a sibling thread is successfully created.

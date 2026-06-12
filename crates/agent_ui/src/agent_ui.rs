@@ -89,7 +89,6 @@ pub use thread_import::{
     channels_with_threads, import_threads_from_other_channels,
 };
 use zed_actions;
-pub use zed_actions::{CreateWorktree, NewWorktreeBranchTarget, SwitchWorktree};
 
 pub(crate) fn resolve_agent_image(
     dest_url: &str,
