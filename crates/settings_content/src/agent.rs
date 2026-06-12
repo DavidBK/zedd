@@ -259,6 +259,10 @@ pub struct AgentSettingsContent {
     ///
     /// Default: write
     pub default_profile: Option<Arc<str>>,
+    /// Which view type to show by default in the agent panel.
+    ///
+    /// Default: "thread"
+    pub default_view: Option<DefaultAgentView>,
     /// The available agent profiles.
     pub profiles: Option<IndexMap<Arc<str>, AgentProfileContent>>,
     /// Where to show a popup notification when the agent is waiting for user input.
@@ -491,6 +495,14 @@ pub struct AgentProfileContent {
 #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize, JsonSchema, MergeFrom)]
 pub struct ContextServerPresetContent {
     pub tools: IndexMap<Arc<str>, bool>,
+}
+
+#[derive(Copy, Clone, Default, Debug, PartialEq, Serialize, Deserialize, JsonSchema, MergeFrom)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultAgentView {
+    #[default]
+    Thread,
+    TextThread,
 }
 
 #[derive(

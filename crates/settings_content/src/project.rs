@@ -14,7 +14,7 @@ use util::serde::default_true;
 
 use crate::{
     AllLanguageSettingsContent, DelayMs, ExtendingVec, ParseStatus, ProjectTerminalSettingsContent,
-    RootUserSettings, SaturatingBool, fallible_options,
+    RootUserSettings, SaturatingBool, SlashCommandSettings, fallible_options,
 };
 
 #[with_fallible_options]
@@ -77,6 +77,9 @@ pub struct ProjectSettingsContent {
 
     /// Configuration for how direnv configuration should be loaded
     pub load_direnv: Option<DirenvSettings>,
+
+    /// Settings for slash commands.
+    pub slash_commands: Option<SlashCommandSettings>,
 
     /// The list of custom Git hosting providers.
     pub git_hosting_providers: Option<ExtendingVec<GitHostingProviderConfig>>,

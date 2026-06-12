@@ -1025,6 +1025,8 @@
     "default_width": 640,
     // Default height when the agent panel is docked to the bottom.
     "default_height": 320,
+    // The view to use by default (thread, or text_thread)
+    "default_view": "thread",
     // Whether to limit the content width in the agent panel. When enabled,
     // content will be constrained to `max_content_width` and centered when
     // the panel is wider, for optimal readability.
@@ -1747,6 +1749,9 @@
     //   - "yes": allow data collection for files in open-source projects.
     //   - "no": never allow data collection.
     "allow_data_collection": "default",
+    // Whether edit predictions are enabled when editing text threads in the agent panel.
+    // This setting has no effect if globally disabled.
+    "enabled_in_text_threads": true,
   },
   // Settings specific to journaling
   "journal": {
