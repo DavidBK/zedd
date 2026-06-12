@@ -9,7 +9,7 @@ use assistant_slash_commands::{DefaultSlashCommand, FileSlashCommand, selections
 use client::{proto, zed_urls};
 use collections::{BTreeSet, HashMap, HashSet, hash_map};
 use editor::{
-    Anchor, Editor, EditorEvent, MenuEditPredictionsPolicy, MultiBuffer, MultiBufferOffset,
+    Anchor, Editor, EditorEvent, MultiBuffer, MultiBufferOffset,
     MultiBufferSnapshot, RowExt, ToOffset as _, ToPoint as _,
     actions::{MoveToEndOfLine, Newline, ShowCompletions},
     display_map::{
@@ -33,7 +33,8 @@ use language::{
     language_settings::{SoftWrap, all_language_settings},
 };
 use language_model::{
-    ConfigurationError, IconOrSvg, LanguageModelImage, LanguageModelRegistry, Role,
+    ConfigurationError, IconOrSvg, LanguageModelImage, LanguageModelImageExt as _,
+    LanguageModelRegistry, Role,
 };
 use multi_buffer::MultiBufferRow;
 use picker::{Picker, popover_menu::PickerPopoverMenu};
@@ -250,8 +251,15 @@ impl TextThreadEditor {
         );
 
         let editor = cx.new(|cx| {
-            let mut editor =
-                Editor::for_buffer(text_thread.read(cx).buffer().clone(), None, window, cx);
+            // Pass the project (rather than `None`) so the edit-prediction
+            // registry's `assign_edit_prediction_provider` doesn't early-return,
+            // allowing Copilot ghost text inside text threads.
+            let mut editor = Editor::for_buffer(
+                text_thread.read(cx).buffer().clone(),
+                Some(project.clone()),
+                window,
+                cx,
+            );
             editor.disable_scrollbars_and_minimap(window, cx);
             editor.set_soft_wrap_mode(SoftWrap::EditorWidth, cx);
             editor.set_show_line_numbers(false, cx);
@@ -262,7 +270,6 @@ impl TextThreadEditor {
             editor.set_show_wrap_guides(false, cx);
             editor.set_show_indent_guides(false, cx);
             editor.set_completion_provider(Some(Rc::new(completion_provider)));
-            editor.set_menu_edit_predictions_policy(MenuEditPredictionsPolicy::Never);
             editor.set_collaboration_hub(Box::new(project.clone()));
 
             let show_edit_predictions = all_language_settings(None, cx)
@@ -329,6 +336,7 @@ impl TextThreadEditor {
                                         effort: model
                                             .default_effort_level()
                                             .map(|effort| effort.value.to_string()),
+                                        speed: None,
                                     },
                                 )
                             });
@@ -532,15 +540,23 @@ impl TextThreadEditor {
             return;
         }
 
-        let selections = self.editor.read(cx).selections.disjoint_anchors_arc();
+        let editor = self.editor.read(cx);
+        let selections = editor.selections.disjoint_anchors_arc();
+        let multi_buffer_snapshot = editor.buffer().read(cx).snapshot(cx);
+        let selection_heads = selections
+            .iter()
+            .filter_map(|selection| {
+                multi_buffer_snapshot
+                    .anchor_to_buffer_anchor(selection.head())
+                    .map(|(anchor, _)| anchor)
+            })
+            .collect::<Vec<_>>();
         let mut commands_by_range = HashMap::default();
         let workspace = self.workspace.clone();
         self.text_thread.update(cx, |text_thread, cx| {
             text_thread.reparse(cx);
-            for selection in selections.iter() {
-                if let Some(command) =
-                    text_thread.pending_command_for_position(selection.head().text_anchor, cx)
-                {
+            for head in selection_heads {
+                if let Some(command) = text_thread.pending_command_for_position(head, cx) {
                     commands_by_range
                         .entry(command.source_range.clone())
                         .or_insert_with(|| command.clone());
@@ -649,7 +665,7 @@ impl TextThreadEditor {
                     self.editor.update(cx, |editor, cx| {
                         let multi_buffer_snapshot = editor.buffer().read(cx).snapshot(cx);
                         let start_anchor =
-                            multi_buffer_snapshot.as_singleton_anchor(start).unwrap();
+                            multi_buffer_snapshot.anchor_in_excerpt(start).unwrap();
 
                         editor.display_map.update(cx, |display_map, cx| {
                             display_map.unfold_intersecting(
@@ -688,7 +704,6 @@ impl TextThreadEditor {
             TextThreadEvent::ParsedSlashCommandsUpdated { removed, updated } => {
                 self.editor.update(cx, |editor, cx| {
                     let buffer = editor.buffer().read(cx).snapshot(cx);
-                    let (excerpt_id, _, _) = buffer.as_singleton().unwrap();
 
                     editor.remove_creases(
                         removed
@@ -741,7 +756,7 @@ impl TextThreadEditor {
                             };
 
                             let range = buffer
-                                .anchor_range_in_excerpt(excerpt_id, command.source_range.clone())
+                                .anchor_range_in_buffer(command.source_range.clone())
                                 .unwrap();
                             Crease::inline(range, placeholder, render_toggle, render_trailer)
                         }),
@@ -811,10 +826,9 @@ impl TextThreadEditor {
             {
                 if let InvokedSlashCommandStatus::Finished = invoked_slash_command.status {
                     let buffer = editor.buffer().read(cx).snapshot(cx);
-                    let (excerpt_id, _buffer_id, _buffer_snapshot) = buffer.as_singleton().unwrap();
 
                     let range = buffer
-                        .anchor_range_in_excerpt(excerpt_id, invoked_slash_command.range.clone())
+                        .anchor_range_in_buffer(invoked_slash_command.range.clone())
                         .unwrap();
                     editor.remove_folds_with_type(
                         &[range],
@@ -831,10 +845,9 @@ impl TextThreadEditor {
                     self.invoked_slash_command_creases.entry(command_id)
                 {
                     let buffer = editor.buffer().read(cx).snapshot(cx);
-                    let (excerpt_id, _buffer_id, _buffer_snapshot) = buffer.as_singleton().unwrap();
                     let context = self.text_thread.downgrade();
                     let range = buffer
-                        .anchor_range_in_excerpt(excerpt_id, invoked_slash_command.range.clone())
+                        .anchor_range_in_buffer(invoked_slash_command.range.clone())
                         .unwrap();
                     let crease = Crease::inline(
                         range,
@@ -871,12 +884,11 @@ impl TextThreadEditor {
     ) -> Vec<CreaseId> {
         self.editor.update(cx, |editor, cx| {
             let buffer = editor.buffer().read(cx).snapshot(cx);
-            let excerpt_id = buffer.as_singleton().unwrap().0;
             let mut buffer_rows_to_fold = BTreeSet::new();
             let mut creases = Vec::new();
             for (section, status) in sections {
                 let range = buffer
-                    .anchor_range_in_excerpt(excerpt_id, section.range)
+                    .anchor_range_in_buffer(section.range)
                     .unwrap();
                 let buffer_row = MultiBufferRow(range.start.to_point(&buffer).row);
                 buffer_rows_to_fold.insert(buffer_row);
@@ -920,12 +932,11 @@ impl TextThreadEditor {
     ) {
         self.editor.update(cx, |editor, cx| {
             let buffer = editor.buffer().read(cx).snapshot(cx);
-            let excerpt_id = buffer.as_singleton().unwrap().0;
             let mut buffer_rows_to_fold = BTreeSet::new();
             let mut creases = Vec::new();
             for section in sections {
                 let range = buffer
-                    .anchor_range_in_excerpt(excerpt_id, section.range)
+                    .anchor_range_in_buffer(section.range)
                     .unwrap();
                 let buffer_row = MultiBufferRow(range.start.to_point(&buffer).row);
                 buffer_rows_to_fold.insert(buffer_row);
@@ -1008,9 +1019,7 @@ impl TextThreadEditor {
                 .to_display_point(&snapshot.display_snapshot)
                 .row()
                 .as_f64();
-            let scroll_position = editor
-                .scroll_manager
-                .scroll_position(&snapshot.display_snapshot, cx);
+            let scroll_position = editor.scroll_position(cx);
 
             let scroll_bottom = scroll_position.y + editor.visible_line_count().unwrap_or(0.);
             if (scroll_position.y..scroll_bottom).contains(&cursor_row) {
@@ -1055,7 +1064,6 @@ impl TextThreadEditor {
         self.editor.update(cx, |editor, cx| {
             let buffer = editor.buffer().read(cx).snapshot(cx);
 
-            let excerpt_id = buffer.as_singleton().unwrap().0;
             let mut old_blocks = std::mem::take(&mut self.blocks);
             let mut blocks_to_remove: HashMap<_, _> = old_blocks
                 .iter()
@@ -1242,7 +1250,7 @@ impl TextThreadEditor {
                 style: BlockStyle::Sticky,
                 placement: BlockPlacement::Above(
                     buffer
-                        .anchor_in_excerpt(excerpt_id, message.anchor_range.start)
+                        .anchor_in_excerpt(message.anchor_range.start)
                         .unwrap(),
                 ),
                 priority: usize::MAX,
@@ -1300,7 +1308,7 @@ impl TextThreadEditor {
                 .is_empty()
             {
                 let snapshot = text_thread_editor.buffer().read(cx).snapshot(cx);
-                let (_, _, snapshot) = snapshot.as_singleton()?;
+                let snapshot = snapshot.as_singleton()?.clone();
 
                 let head = text_thread_editor
                     .selections
@@ -1308,7 +1316,7 @@ impl TextThreadEditor {
                     .head();
                 let offset = snapshot.point_to_offset(head);
 
-                let surrounding_code_block_range = find_surrounding_code_block(snapshot, offset)?;
+                let surrounding_code_block_range = find_surrounding_code_block(&snapshot, offset)?;
                 let mut text = snapshot
                     .text_for_range(surrounding_code_block_range)
                     .collect::<String>();
@@ -1986,7 +1994,10 @@ impl TextThreadEditor {
                         .selections
                         .all::<MultiBufferOffset>(&editor.display_snapshot(cx))
                     {
-                        image_positions.push(snapshot.anchor_before(selection.end));
+                        let anchor = snapshot.anchor_before(selection.end);
+                        if let Some((text_anchor, _)) = snapshot.anchor_to_buffer_anchor(anchor) {
+                            image_positions.push(text_anchor);
+                        }
                     }
                 });
             });
@@ -2003,7 +2014,7 @@ impl TextThreadEditor {
                     for image_position in image_positions.iter() {
                         text_thread.insert_content(
                             Content::Image {
-                                anchor: image_position.text_anchor,
+                                anchor: *image_position,
                                 image_id,
                                 image: image_task.clone(),
                                 render_image: render_image.clone(),
@@ -2025,7 +2036,6 @@ impl TextThreadEditor {
     fn update_image_blocks(&mut self, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
             let buffer = editor.buffer().read(cx).snapshot(cx);
-            let excerpt_id = buffer.as_singleton().unwrap().0;
             let old_blocks = std::mem::take(&mut self.image_blocks);
             let new_blocks = self
                 .text_thread
@@ -2040,7 +2050,7 @@ impl TextThreadEditor {
                 )
                 .filter_map(|(anchor, render_image)| {
                     const MAX_HEIGHT_IN_LINES: u32 = 8;
-                    let anchor = buffer.anchor_in_excerpt(excerpt_id, anchor).unwrap();
+                    let anchor = buffer.anchor_in_excerpt(anchor).unwrap();
                     let image = render_image;
                     anchor.is_valid(&buffer).then(|| BlockProperties {
                         placement: BlockPlacement::Above(anchor),
@@ -2285,7 +2295,7 @@ impl TextThreadEditor {
                 .start_icon(provider_icon_element)
                 .end_icon(Icon::new(icon).color(color).size(IconSize::XSmall)),
             tooltip,
-            gpui::Corner::BottomRight,
+            gpui::Anchor::BottomRight,
             cx,
         )
         .with_handle(self.language_model_selector_menu_handle.clone())
@@ -2653,7 +2663,7 @@ impl Render for TextThreadEditor {
             .size_full()
             .child(
                 div()
-                    .flex_grow()
+                    .flex_grow(1.)
                     .bg(cx.theme().colors().editor_background)
                     .child(self.editor.clone()),
             )
@@ -2794,9 +2804,15 @@ impl SearchableItem for TextThreadEditor {
         });
     }
 
-    fn query_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) -> String {
-        self.editor
-            .update(cx, |editor, cx| editor.query_suggestion(window, cx))
+    fn query_suggestion(
+        &mut self,
+        seed_query_override: Option<settings::SeedQuerySetting>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> String {
+        self.editor.update(cx, |editor, cx| {
+            editor.query_suggestion(seed_query_override, window, cx)
+        })
     }
 
     fn activate_match(

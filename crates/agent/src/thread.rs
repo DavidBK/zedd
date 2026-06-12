@@ -355,6 +355,9 @@ impl UserMessage {
                         MentionUri::Thread { .. } => {
                             write!(&mut thread_context, "\n{}\n", content).ok();
                         }
+                        MentionUri::TextThread { .. } => {
+                            write!(&mut thread_context, "\n{}\n", content).ok();
+                        }
                         MentionUri::Rule { .. } => {
                             // Deprecated: keeps legacy rule mentions as context.
                             write!(

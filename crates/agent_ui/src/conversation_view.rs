@@ -2969,6 +2969,22 @@ impl ConversationView {
         }
     }
 
+    /// Inserts terminal text as a crease into the message editor.
+    pub(crate) fn insert_terminal_text(
+        &self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(active_thread) = self.active_thread() {
+            active_thread.update(cx, |thread, cx| {
+                thread.message_editor.update(cx, |editor, cx| {
+                    editor.insert_terminal_crease(text, window, cx);
+                })
+            });
+        }
+    }
+
     fn current_model_name(&self, cx: &App) -> SharedString {
         // For native agent (Zed Agent), use the specific model name (e.g., "Claude 3.5 Sonnet")
         // For ACP agents, use the agent name (e.g., "Claude Agent", "Gemini CLI")

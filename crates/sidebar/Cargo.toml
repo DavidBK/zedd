@@ -36,6 +36,7 @@ menu.workspace = true
 notifications.workspace = true
 platform_title_bar.workspace = true
 project.workspace = true
+prompt_store.workspace = true
 recent_projects.workspace = true
 remote.workspace = true
 remote_connection.workspace = true

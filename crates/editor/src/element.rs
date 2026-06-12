@@ -8741,29 +8741,13 @@ impl Element for EditorElement {
                             )
                         });
 
-                    let (edit_prediction_popover, edit_prediction_popover_origin) = self
-                        .editor
-                        .update(cx, |editor, cx| {
-                            editor.render_edit_prediction_popover(
-                                &text_hitbox.bounds,
-                                content_origin,
-                                right_margin,
-                                &snapshot,
-                                start_row..end_row,
-                                scroll_position.y,
-                                scroll_position.y + height_in_lines,
-                                &line_layouts,
-                                line_height,
-                                scroll_position,
-                                scroll_pixel_position,
-                                newest_selection_head,
-                                editor_width,
-                                style,
-                                window,
-                                cx,
-                            )
-                        })
-                        .unzip();
+                    // Edit-prediction popovers (jump-to-edit, diff preview,
+                    // end-of-line accept, jump-outside) are intentionally
+                    // disabled: only inline Copilot ghost text is shown.
+                    let (edit_prediction_popover, edit_prediction_popover_origin): (
+                        Option<AnyElement>,
+                        Option<gpui::Point<Pixels>>,
+                    ) = (None, None);
 
                     let mut inline_diagnostics = self.layout_inline_diagnostics(
                         &line_layouts,

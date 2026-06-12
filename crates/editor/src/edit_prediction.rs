@@ -601,19 +601,10 @@ impl Editor {
     /// Returns true when we're displaying the edit prediction popover below the cursor
     /// like we are not previewing and the LSP autocomplete menu is visible
     /// or we are in `when_holding_modifier` mode.
-    pub fn edit_prediction_visible_in_cursor_popover(&self, has_completion: bool) -> bool {
-        if self.edit_prediction_preview_is_active()
-            || !self.show_edit_predictions_in_menu()
-            || !self.edit_predictions_enabled()
-        {
-            return false;
-        }
-
-        if self.has_visible_completions_menu() {
-            return true;
-        }
-
-        has_completion && self.edit_prediction_requires_modifier()
+    pub fn edit_prediction_visible_in_cursor_popover(&self, _has_completion: bool) -> bool {
+        // Keep only inline Copilot ghost text: never surface the cursor
+        // edit-prediction popover (the away-from-cursor preview box).
+        false
     }
 
     pub fn edit_prediction_provider(&self) -> Option<Arc<dyn EditPredictionDelegateHandle>> {
@@ -1072,6 +1063,9 @@ impl Editor {
         Some(())
     }
 
+    // Retained but currently unused: edit-prediction popovers are disabled at
+    // the call site so only inline Copilot ghost text is shown.
+    #[allow(dead_code)]
     pub(super) fn render_edit_prediction_popover(
         &mut self,
         text_bounds: &Bounds<Pixels>,
@@ -1207,6 +1201,9 @@ impl Editor {
         px(30.)
     }
 
+    // Retained but currently unused: the cursor edit-prediction popover is
+    // disabled so only inline Copilot ghost text is shown.
+    #[allow(dead_code)]
     pub(super) fn render_edit_prediction_cursor_popover(
         &self,
         min_width: Pixels,

@@ -216,6 +216,7 @@ fn run_visual_tests(project_path: PathBuf, update_baseline: bool) -> Result<()> 
         );
         agent_ui::init(
             app_state.fs.clone(),
+            app_state.client.clone(),
             prompt_builder,
             app_state.languages.clone(),
             true,
@@ -2158,9 +2159,11 @@ fn run_agent_thread_view_test(
         .context("Failed to get workspace handle")?;
 
     cx.background_executor.allow_parking();
+    let prompt_builder =
+        cx.update(|cx| prompt_store::PromptBuilder::load(app_state.fs.clone(), false, cx));
     let panel = cx
         .foreground_executor
-        .block_test(AgentPanel::load(weak_workspace, async_window_cx))
+        .block_test(AgentPanel::load(weak_workspace, prompt_builder, async_window_cx))
         .context("Failed to load AgentPanel")?;
     cx.background_executor.forbid_parking();
 

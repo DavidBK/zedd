@@ -2,15 +2,9 @@ use client::{Client, UserStore};
 use codestral::{CodestralEditPredictionDelegate, load_codestral_api_key};
 use collections::HashMap;
 use copilot::CopilotEditPredictionDelegate;
-use edit_prediction::{EditPredictionModel, ZedEditPredictionDelegate};
 use editor::Editor;
 use gpui::{AnyWindowHandle, App, AppContext as _, Context, Entity, WeakEntity};
-use language::{
-    ZetaVersion,
-    language_settings::{
-        EditPredictionPromptFormat, EditPredictionProvider, all_language_settings,
-    },
-};
+use language::language_settings::{EditPredictionProvider, all_language_settings};
 
 use settings::SettingsStore;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
@@ -112,70 +106,24 @@ pub fn init(client: Arc<Client>, user_store: Entity<UserStore>, cx: &mut App) {
 
 fn edit_prediction_provider_config_for_settings(cx: &App) -> Option<EditPredictionProviderConfig> {
     let settings = &all_language_settings(None, cx).edit_predictions;
-    let provider = settings.provider;
-    match provider {
-        EditPredictionProvider::None => None,
+    match settings.provider {
         EditPredictionProvider::Copilot => Some(EditPredictionProviderConfig::Copilot),
-        EditPredictionProvider::Zed => {
-            Some(EditPredictionProviderConfig::Zed(EditPredictionModel::Zeta))
-        }
         EditPredictionProvider::Codestral => Some(EditPredictionProviderConfig::Codestral),
-        EditPredictionProvider::Ollama | EditPredictionProvider::OpenAiCompatibleApi => {
-            let custom_settings = if provider == EditPredictionProvider::Ollama {
-                settings.ollama.as_ref()?
-            } else {
-                settings.open_ai_compatible_api.as_ref()?
-            };
-
-            let mut format = custom_settings.prompt_format;
-            if format == EditPredictionPromptFormat::Infer {
-                if let Some(inferred_format) = infer_prompt_format(&custom_settings.model) {
-                    format = inferred_format;
-                } else {
-                    // todo: notify user that prompt format inference failed
-                    return None;
-                }
-            }
-
-            if matches!(format, EditPredictionPromptFormat::Zeta(_)) {
-                Some(EditPredictionProviderConfig::Zed(EditPredictionModel::Zeta))
-            } else {
-                Some(EditPredictionProviderConfig::Zed(
-                    EditPredictionModel::Fim { format },
-                ))
-            }
-        }
-
-        EditPredictionProvider::Mercury => Some(EditPredictionProviderConfig::Zed(
-            EditPredictionModel::Mercury,
-        )),
+        // Next-edit-prediction providers (Zed/Zeta, Ollama, OpenAI-compatible,
+        // Mercury) are not wired up in this fork; only simple ghost-text
+        // providers are supported.
+        EditPredictionProvider::None
+        | EditPredictionProvider::Zed
+        | EditPredictionProvider::Ollama
+        | EditPredictionProvider::OpenAiCompatibleApi
+        | EditPredictionProvider::Mercury => None,
     }
-}
-
-fn infer_prompt_format(model: &str) -> Option<EditPredictionPromptFormat> {
-    let model_base = model.split(':').next().unwrap_or(model);
-
-    Some(match model_base {
-        "zeta2" => EditPredictionPromptFormat::Zeta(ZetaVersion::Zeta2),
-        "zeta2.1" => EditPredictionPromptFormat::Zeta(ZetaVersion::Zeta2_1),
-        "codellama" | "code-llama" => EditPredictionPromptFormat::CodeLlama,
-        "starcoder" | "starcoder2" | "starcoderbase" => EditPredictionPromptFormat::StarCoder,
-        "deepseek-coder" | "deepseek-coder-v2" => EditPredictionPromptFormat::DeepseekCoder,
-        "qwen2.5-coder" | "qwen-coder" | "qwen" => EditPredictionPromptFormat::Qwen,
-        "codegemma" => EditPredictionPromptFormat::CodeGemma,
-        "codestral" | "mistral" => EditPredictionPromptFormat::Codestral,
-        "glm" | "glm-4" | "glm-4.5" => EditPredictionPromptFormat::Glm,
-        _ => {
-            return None;
-        }
-    })
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum EditPredictionProviderConfig {
     Copilot,
     Codestral,
-    Zed(EditPredictionModel),
 }
 
 impl EditPredictionProviderConfig {
@@ -183,11 +131,6 @@ impl EditPredictionProviderConfig {
         match self {
             EditPredictionProviderConfig::Copilot => "Copilot",
             EditPredictionProviderConfig::Codestral => "Codestral",
-            EditPredictionProviderConfig::Zed(model) => match model {
-                EditPredictionModel::Zeta => "Zeta",
-                EditPredictionModel::Fim { .. } => "FIM",
-                EditPredictionModel::Mercury => "Mercury",
-            },
         }
     }
 }
@@ -250,7 +193,7 @@ fn assign_edit_prediction_provider(
 
     match provider_config {
         None => {
-            editor.set_edit_prediction_provider::<ZedEditPredictionDelegate>(None, window, cx);
+            editor.set_edit_prediction_provider::<CopilotEditPredictionDelegate>(None, window, cx);
         }
         Some(EditPredictionProviderConfig::Copilot) => {
             let ep_store = edit_prediction::EditPredictionStore::global(client, &user_store, cx);
@@ -274,41 +217,6 @@ fn assign_edit_prediction_provider(
             let http_client = client.http_client();
             let provider = cx.new(|_| CodestralEditPredictionDelegate::new(http_client));
             editor.set_edit_prediction_provider(Some(provider), window, cx);
-        }
-        Some(EditPredictionProviderConfig::Zed(model)) => {
-            let ep_store = edit_prediction::EditPredictionStore::global(client, &user_store, cx);
-
-            if let Some(organization_configuration) =
-                user_store.read(cx).current_organization_configuration()
-            {
-                if !organization_configuration.edit_prediction.is_enabled {
-                    editor.set_edit_prediction_provider::<ZedEditPredictionDelegate>(
-                        None, window, cx,
-                    );
-
-                    return;
-                }
-            }
-
-            if let Some(project) = editor.project() {
-                ep_store.update(cx, |ep_store, cx| {
-                    ep_store.set_edit_prediction_model(model);
-                    if let Some(buffer) = &singleton_buffer {
-                        ep_store.register_buffer(buffer, project, cx);
-                    }
-                });
-
-                let provider = cx.new(|cx| {
-                    ZedEditPredictionDelegate::new(
-                        project.clone(),
-                        singleton_buffer,
-                        &client,
-                        &user_store,
-                        cx,
-                    )
-                });
-                editor.set_edit_prediction_provider(Some(provider), window, cx);
-            }
         }
     }
 }

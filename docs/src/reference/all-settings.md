@@ -5408,32 +5408,6 @@ See the [debugger page](../debugger.md) for more information about debugging sup
 - `scrollbar`: When to show the scrollbar in the git panel
 - `starts_open`: Whether the git panel should open on startup
 
-## Git Worktree Directory
-
-- Description: Directory where git worktrees are created, relative to the repository working directory.
-- Setting: `git.worktree_directory`
-- Default: `"../worktrees"`
-
-When the resolved directory falls outside the project root, the project's directory name is automatically appended so that sibling repos don't collide. For example, with the default `"../worktrees"` and a project at `~/code/zed`, worktrees are created under `~/code/worktrees/zed/`.
-
-When the resolved directory is inside the project root, no extra component is added (it's already project-scoped).
-
-**Examples**:
-
-- `"../worktrees"` — `~/code/worktrees/<project>/` (default)
-- `".git/zed-worktrees"` — `<project>/.git/zed-worktrees/`
-- `"my-worktrees"` — `<project>/my-worktrees/`
-
-Trailing slashes are ignored.
-
-```json [settings]
-{
-  "git": {
-    "worktree_directory": "../worktrees"
-  }
-}
-```
-
 ## Git Hosting Providers
 
 - Description: Register self-hosted GitHub, GitLab, or Bitbucket instances so commit hashes, issue references, and permalinks resolve to the right host.

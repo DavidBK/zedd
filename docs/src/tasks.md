@@ -230,31 +230,6 @@ This could be useful for launching a terminal application that you want to use i
 }
 ```
 
-## Hooks
-
-In addition to being spawned manually, tasks can be configured to run automatically in response to certain Zed events by adding a hook to the `hooks` field on a task template. A task with a matching hook will be resolved and spawned when that event fires.
-
-The following hooks are currently supported:
-
-- `create_worktree` — runs after Zed creates a new linked Git worktree, either directly through the CLI or from the [worktree picker](./git.md#git-worktrees). The task is spawned with `ZED_WORKTREE_ROOT` pointing at the newly created worktree and `ZED_MAIN_GIT_WORKTREE` pointing at the original repository's working directory, which makes these hooks well-suited to copying untracked files (such as `.env` files) or running per-worktree setup commands.
-
-Hook tasks are resolved from the same global and worktree-local `tasks.json` files as manually spawned tasks, and multiple tasks may register for the same hook; they all run when the hook fires. A hook task still benefits from the usual task configuration fields — `cwd`, `env`, `reveal`, `hide`, and so on — so you can control how much of the terminal UI is shown while it runs.
-
-```json [tasks]
-[
-  {
-    "label": "copy .env into new worktree",
-    "command": "cp",
-    "args": ["$ZED_MAIN_GIT_WORKTREE/.env", "$ZED_WORKTREE_ROOT/.env"],
-    "hooks": ["create_worktree"],
-    "reveal": "no_focus",
-    "hide": "on_success"
-  }
-]
-```
-
-Tasks that define `hooks` are still available from the task modal like any other task, so the same template can be reused for manual runs.
-
 ## Custom Git Commands
 
 The Git Graph supports running custom Git command tasks from the commit context menu.

@@ -6237,22 +6237,17 @@ impl Project {
     }
 }
 
-/// Identifies a project group by a set of paths the workspaces in this group
-/// have.
-///
-/// Paths are mapped to their main worktree path first so we can group
-/// workspaces by main repos.
+/// Identifies a project group by the set of opened folder paths the workspaces
+/// in this group have.
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct ProjectGroupKey {
-    /// The paths of the main worktrees for this project group.
+    /// The opened folder paths for this project group.
     paths: PathList,
     host: Option<RemoteConnectionOptions>,
 }
 
 impl ProjectGroupKey {
     /// Creates a new `ProjectGroupKey` with the given path list.
-    ///
-    /// The path list should point to the git main worktree paths for a project.
     pub fn new(host: Option<RemoteConnectionOptions>, paths: PathList) -> Self {
         Self { paths, host }
     }
@@ -6261,7 +6256,7 @@ impl ProjectGroupKey {
         let paths = project.worktree_paths(cx);
         let host = project.remote_connection_options(cx);
         Self {
-            paths: paths.main_worktree_path_list().clone(),
+            paths: paths.folder_path_list().clone(),
             host,
         }
     }
@@ -6271,7 +6266,7 @@ impl ProjectGroupKey {
         host: Option<RemoteConnectionOptions>,
     ) -> Self {
         Self {
-            paths: paths.main_worktree_path_list().clone(),
+            paths: paths.folder_path_list().clone(),
             host,
         }
     }

@@ -1431,6 +1431,141 @@ impl MessageEditor {
         .detach();
     }
 
+    fn insert_crease_impl(
+        &mut self,
+        text: String,
+        title: String,
+        icon: IconName,
+        add_trailing_newline: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use editor::display_map::{Crease, FoldPlaceholder};
+        use multi_buffer::MultiBufferRow;
+        use rope::Point;
+        use ui::{Disclosure, ElevationIndex};
+
+        self.editor.update(cx, |editor, cx| {
+            let point = editor
+                .selections
+                .newest::<Point>(&editor.display_snapshot(cx))
+                .head();
+            let start_row = MultiBufferRow(point.row);
+
+            editor.insert(&text, window, cx);
+
+            let snapshot = editor.buffer().read(cx).snapshot(cx);
+            let anchor_before = snapshot.anchor_after(point);
+            let anchor_after = editor
+                .selections
+                .newest_anchor()
+                .head()
+                .bias_left(&snapshot);
+
+            if add_trailing_newline {
+                editor.insert("\n", window, cx);
+            }
+
+            let fold_placeholder = FoldPlaceholder {
+                render: Arc::new({
+                    let title = title.clone();
+                    move |_fold_id, _fold_range, _cx| {
+                        Button::new("crease", title.clone())
+                            .layer(ElevationIndex::ElevatedSurface)
+                            .start_icon(Icon::new(icon))
+                            .into_any_element()
+                    }
+                }),
+                merge_adjacent: false,
+                ..Default::default()
+            };
+
+            let crease = Crease::inline(
+                anchor_before..anchor_after,
+                fold_placeholder,
+                |row, is_folded, fold, _window, _cx| {
+                    Disclosure::new(("crease-toggle", row.0 as u64), !is_folded)
+                        .toggle_state(is_folded)
+                        .on_click(move |_e, window, cx| fold(!is_folded, window, cx))
+                        .into_any_element()
+                },
+                |_, _, _, _| gpui::Empty.into_any(),
+            );
+            editor.insert_creases(vec![crease], cx);
+            editor.fold_at(start_row, window, cx);
+        });
+    }
+
+    /// Inserts code snippets as creases into the editor.
+    /// Each tuple contains (code_text, crease_title).
+    pub fn insert_code_creases(
+        &mut self,
+        creases: Vec<(String, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.update(cx, |editor, cx| {
+            editor.insert("\n", window, cx);
+        });
+        for (text, crease_title) in creases {
+            self.insert_crease_impl(text, crease_title, IconName::TextSnippet, true, window, cx);
+        }
+    }
+
+    pub fn insert_terminal_crease(
+        &mut self,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let line_count = text.lines().count() as u32;
+        let mention_uri = MentionUri::TerminalSelection { line_count };
+        let mention_text = mention_uri.as_link().to_string();
+
+        let Some((text_anchor, content_len)) = self.editor.update(cx, |editor, cx| {
+            let buffer = editor.buffer().read(cx);
+            let snapshot = buffer.snapshot(cx);
+            let start = editor.selections.newest_anchor().start;
+            let text_anchor = snapshot
+                .anchor_to_buffer_anchor(start)
+                .map(|(anchor, buffer_snapshot)| anchor.bias_left(buffer_snapshot));
+
+            editor.insert(&mention_text, window, cx);
+            editor.insert(" ", window, cx);
+
+            text_anchor.map(|text_anchor| (text_anchor, mention_text.len()))
+        }) else {
+            return;
+        };
+
+        let Some((crease_id, tx, _crease_entity)) = insert_crease_for_mention(
+            text_anchor,
+            content_len,
+            mention_uri.name().into(),
+            mention_uri.icon_path(cx),
+            mention_uri.tooltip_text(),
+            Some(mention_uri.clone()),
+            Some(self.workspace.clone()),
+            None,
+            self.editor.clone(),
+            window,
+            cx,
+        ) else {
+            return;
+        };
+        drop(tx);
+
+        let mention_task = Task::ready(Ok(Mention::Text {
+            content: text,
+            tracked_buffers: vec![],
+        }))
+        .shared();
+
+        self.mention_set.update(cx, |mention_set, cx| {
+            mention_set.insert_mention(crease_id, mention_uri, mention_task, None, cx);
+        });
+    }
+
     pub fn insert_branch_diff_crease(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(workspace) = self.workspace.upgrade() else {
             return;

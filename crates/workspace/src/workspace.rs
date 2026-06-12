@@ -9227,7 +9227,7 @@ pub async fn restore_multiworkspace(
         }
     };
 
-    apply_restored_multiworkspace_state(window_handle, &state, app_state.fs.clone(), cx).await;
+    apply_restored_multiworkspace_state(window_handle, &state, cx).await;
 
     window_handle
         .update(cx, |_, window, _cx| {
@@ -9241,7 +9241,6 @@ pub async fn restore_multiworkspace(
 pub async fn apply_restored_multiworkspace_state(
     window_handle: WindowHandle<MultiWorkspace>,
     state: &MultiWorkspaceState,
-    fs: Arc<dyn fs::Fs>,
     cx: &mut AsyncApp,
 ) {
     let MultiWorkspaceState {
@@ -9252,38 +9251,20 @@ pub async fn apply_restored_multiworkspace_state(
     } = state;
 
     if !project_groups.is_empty() {
-        // Resolve linked worktree paths to their main repo paths so
-        // stale keys from previous sessions get normalized and deduped.
-        let mut resolved_groups: Vec<SerializedProjectGroupState> = Vec::new();
+        let mut restored_groups: Vec<SerializedProjectGroupState> = Vec::new();
         for serialized in project_groups.iter().cloned() {
             let SerializedProjectGroupState { key, expanded } = serialized.into_restored_state();
             if key.path_list().paths().is_empty() {
                 continue;
             }
-            let mut resolved_paths = Vec::new();
-            for path in key.path_list().paths() {
-                if key.host().is_none()
-                    && let Some(common_dir) =
-                        project::discover_root_repo_common_dir(path, fs.as_ref()).await
-                {
-                    let main_path = project::repo_identity_path(&common_dir);
-                    resolved_paths.push(main_path.to_path_buf());
-                } else {
-                    resolved_paths.push(path.to_path_buf());
-                }
-            }
-            let resolved = ProjectGroupKey::new(key.host(), PathList::new(&resolved_paths));
-            if !resolved_groups.iter().any(|g| g.key == resolved) {
-                resolved_groups.push(SerializedProjectGroupState {
-                    key: resolved,
-                    expanded,
-                });
+            if !restored_groups.iter().any(|group| group.key == key) {
+                restored_groups.push(SerializedProjectGroupState { key, expanded });
             }
         }
 
         window_handle
             .update(cx, |multi_workspace, _window, cx| {
-                multi_workspace.restore_project_groups(resolved_groups, cx);
+                multi_workspace.restore_project_groups(restored_groups, cx);
             })
             .ok();
     }
