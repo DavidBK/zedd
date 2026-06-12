@@ -20,7 +20,7 @@ use cloud_llm_client::{
 use collections::{HashMap, HashSet};
 use copilot::{Copilot, Reinstall, SignIn, SignOut};
 use credentials_provider::CredentialsProvider;
-use db::kvp::{Dismissable, KeyValueStore};
+use db::kvp::KeyValueStore;
 use edit_prediction_context::{RelatedExcerptStore, RelatedExcerptStoreEvent, RelatedFile};
 use edit_prediction_types::EditPredictionRequestTrigger;
 use feature_flags::{FeatureFlag, FeatureFlagAppExt as _, PresenceFlag, register_feature_flag};
@@ -48,9 +48,7 @@ use project::{DisableAiSettings, Project, ProjectPath, WorktreeId};
 use release_channel::AppVersion;
 use semver::Version;
 use serde::de::DeserializeOwned;
-use settings::{
-    EditPredictionDataCollectionChoice, EditPredictionProvider, Settings as _, update_settings_file,
-};
+use settings::{EditPredictionDataCollectionChoice, EditPredictionProvider, Settings as _};
 use std::collections::{VecDeque, hash_map};
 use std::env;
 use std::rc::Rc;
@@ -79,7 +77,6 @@ mod license_detection;
 pub mod mercury;
 pub mod metrics;
 pub mod ollama;
-mod onboarding_modal;
 pub mod open_ai_response;
 mod prediction;
 
@@ -104,7 +101,6 @@ use crate::jump_example::{
 use crate::license_detection::LicenseDetectionWatcher;
 use crate::mercury::Mercury;
 pub use crate::metrics::{KeptRateResult, compute_kept_rate};
-use crate::onboarding_modal::ZedPredictModal;
 pub use crate::prediction::EditPrediction;
 pub use crate::prediction::EditPredictionId;
 use crate::prediction::EditPredictionResult;
@@ -115,8 +111,6 @@ pub use zed_edit_prediction_delegate::ZedEditPredictionDelegate;
 actions!(
     edit_prediction,
     [
-        /// Resets the edit prediction onboarding state.
-        ResetOnboarding,
         /// Clears the edit prediction history.
         ClearHistory,
     ]
@@ -3516,63 +3510,8 @@ pub struct ZedUpdateRequiredError {
 #[error("Cloud request timed out")]
 pub(crate) struct CloudRequestTimeoutError;
 
-struct ZedPredictUpsell;
-
-fn is_upsell_dismissed(cx: &App) -> bool {
-    // To make this backwards compatible with older versions of Zed, we
-    // check if the user has seen the previous Edit Prediction Onboarding
-    // before, by checking the data collection choice which was written to
-    // the database once the user clicked on "Accept and Enable"
-    let kvp = KeyValueStore::global(cx);
-    if kvp
-        .read_kvp(ZED_PREDICT_DATA_COLLECTION_CHOICE)
-        .log_err()
-        .is_some_and(|s| s.is_some())
-    {
-        return true;
-    }
-
-    kvp.read_kvp(ZedPredictUpsell::KEY)
-        .log_err()
-        .is_some_and(|s| s.is_some())
-}
-
-impl Dismissable for ZedPredictUpsell {
-    const KEY: &'static str = "dismissed-edit-predict-upsell";
-
-    fn dismissed(cx: &App) -> bool {
-        is_upsell_dismissed(cx)
-    }
-}
-
-pub fn should_show_upsell_modal(cx: &App) -> bool {
-    !is_upsell_dismissed(cx)
-}
-
 pub fn init(cx: &mut App) {
     cx.observe_new(move |workspace: &mut Workspace, _, _cx| {
-        workspace.register_action(
-            move |workspace, _: &zed_actions::OpenZedPredictOnboarding, window, cx| {
-                ZedPredictModal::toggle(
-                    workspace,
-                    workspace.user_store().clone(),
-                    workspace.client().clone(),
-                    window,
-                    cx,
-                )
-            },
-        );
-
-        workspace.register_action(|workspace, _: &ResetOnboarding, _window, cx| {
-            update_settings_file(workspace.app_state().fs.clone(), cx, move |settings, _| {
-                settings
-                    .project
-                    .all_languages
-                    .edit_predictions
-                    .get_or_insert_default()
-                    .provider = Some(EditPredictionProvider::None)
-            });
-        });
         fn copilot_for_project(project: &Entity<Project>, cx: &mut App) -> Option<Entity<Copilot>> {
             EditPredictionStore::try_global(cx).and_then(|store| {
                 store.update(cx, |this, cx| this.start_copilot_for_project(project, cx))
