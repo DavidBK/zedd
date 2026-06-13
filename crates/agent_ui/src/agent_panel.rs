@@ -106,7 +106,7 @@ use ui::{
 use util::ResultExt as _;
 use workspace::{
     CollaboratorId, DraggedSelection, DraggedTab, MultiWorkspace, PathList, SerializedPathList,
-    ToggleWorkspaceSidebar, ToggleZoom, ToolbarItemView as _, Workspace, WorkspaceId,
+    ToggleZoom, ToolbarItemView as _, Workspace, WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
@@ -5930,9 +5930,7 @@ impl AgentPanel {
 
                         menu = menu
                             .action("Text Thread History", Box::new(OpenHistory))
-                            .action("Settings", Box::new(OpenSettings))
-                            .separator()
-                            .action("Toggle Threads Sidebar", Box::new(ToggleWorkspaceSidebar));
+                            .action("Settings", Box::new(OpenSettings));
 
                         if has_auth_methods || supports_logout {
                             menu = menu.separator()
