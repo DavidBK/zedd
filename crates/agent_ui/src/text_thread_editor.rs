@@ -251,8 +251,15 @@ impl TextThreadEditor {
         );
 
         let editor = cx.new(|cx| {
-            let mut editor =
-                Editor::for_buffer(text_thread.read(cx).buffer().clone(), None, window, cx);
+            // Pass the project (rather than `None`) so the edit-prediction
+            // registry's `assign_edit_prediction_provider` doesn't early-return,
+            // allowing Copilot ghost text inside text threads.
+            let mut editor = Editor::for_buffer(
+                text_thread.read(cx).buffer().clone(),
+                Some(project.clone()),
+                window,
+                cx,
+            );
             editor.disable_scrollbars_and_minimap(window, cx);
             editor.set_soft_wrap_mode(SoftWrap::EditorWidth, cx);
             editor.set_show_line_numbers(false, cx);
