@@ -2036,7 +2036,9 @@ impl AgentPanel {
             return;
         }
 
-        self.new_thread_with_workspace(None, window, cx);
+        // The panel hosts only text threads, so `NewThread` (cmd-n) creates a
+        // new text thread instead of an agentic thread.
+        self.new_text_thread(window, cx);
     }
 
     fn new_thread_with_workspace(
@@ -6347,31 +6349,33 @@ impl AgentPanel {
             .justify_between();
 
         let empty_thread_title = matches!(mode, ToolbarMode::EmptyThread).then(|| {
-            Label::new(format!("New {} Thread", selected_agent_label))
+            let _ = &selected_agent_label;
+            Label::new("New Text Thread")
                 .color(Color::Muted)
                 .truncate()
                 .into_any_element()
         });
 
         let toolbar_content = {
-            let new_thread_menu = PopoverMenu::new("new_thread_menu")
-                .trigger_with_tooltip(
-                    IconButton::new("new_thread_menu_btn", IconName::Plus)
-                        .icon_size(IconSize::Small),
-                    {
-                        move |_window, cx| {
-                            Tooltip::for_action_in(
-                                "New Thread\u{2026}",
-                                &ToggleNewThreadMenu,
-                                &focus_handle,
-                                cx,
-                            )
-                        }
-                    },
-                )
-                .anchor(Anchor::TopRight)
-                .with_handle(self.new_thread_menu_handle.clone())
-                .menu(move |window, cx| new_thread_menu_builder(window, cx));
+            // The panel hosts only text threads, so the new-thread affordance
+            // is a single button that creates a new text thread.
+            let _ = &new_thread_menu_builder;
+            let new_thread_menu = IconButton::new("new_text_thread_btn", IconName::Plus)
+                .icon_size(IconSize::Small)
+                .tooltip({
+                    let focus_handle = focus_handle.clone();
+                    move |_window, cx| {
+                        Tooltip::for_action_in(
+                            "New Text Thread",
+                            &NewTextThread,
+                            &focus_handle,
+                            cx,
+                        )
+                    }
+                })
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.new_text_thread(window, cx);
+                }));
 
             base_container
                 .child(
