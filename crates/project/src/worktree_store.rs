@@ -93,7 +93,7 @@ impl WorktreePaths {
         &self.paths
     }
 
-    /// The main worktree paths (for group key / `threads_by_main_paths` index).
+    /// The main worktree paths (for the `threads_by_main_paths` index).
     pub fn main_worktree_path_list(&self) -> &PathList {
         &self.main_paths
     }

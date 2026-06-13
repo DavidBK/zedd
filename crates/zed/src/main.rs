@@ -1531,13 +1531,7 @@ pub(crate) async fn restore_or_create_workspace(
                             cx,
                         )
                         .await?;
-                        workspace::apply_restored_multiworkspace_state(
-                            window,
-                            &state,
-                            app_state.fs.clone(),
-                            cx,
-                        )
-                        .await;
+                        workspace::apply_restored_multiworkspace_state(window, &state, cx).await;
                         Ok::<(), anyhow::Error>(())
                     }
                     .await
