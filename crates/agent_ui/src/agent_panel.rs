@@ -1576,34 +1576,10 @@ impl AgentPanel {
                         panel.selected_agent = agent;
                     }
 
-                    if let Some(metadata) = terminal_to_restore {
-                        panel.restore_terminal_for_panel_load(
-                            metadata,
-                            false,
-                            AgentThreadSource::AgentPanel,
-                            Some(workspace),
-                            window,
-                            cx,
-                        );
-                    } else if let Some((info, thread_id)) = thread_to_restore {
-                        let agent = panel.selected_agent.clone();
-                        panel.load_agent_thread(
-                            agent,
-                            thread_id,
-                            info.work_dirs.as_ref().map(PathList::deserialize),
-                            info.title.clone().map(Into::into),
-                            false,
-                            AgentThreadSource::AgentPanel,
-                            window,
-                            cx,
-                        );
-                    }
-                    if let Some(new_draft_thread_id) = serialized_panel
-                        .as_ref()
-                        .and_then(|p| p.new_draft_thread_id)
-                    {
-                        panel.restore_new_draft(new_draft_thread_id, window, cx);
-                    }
+                    // The panel hosts only text threads, so don't restore
+                    // agentic threads or terminals from the serialized panel
+                    // state. The panel opens a fresh text thread on activation.
+                    let _ = (&terminal_to_restore, &thread_to_restore);
                     cx.notify();
                 });
 
@@ -2137,6 +2113,7 @@ impl AgentPanel {
     /// If the active view already holds this thread — because the user's
     /// last-active thread was the new-draft itself — we reuse that
     /// ConversationView instead of building a second one.
+    #[allow(dead_code)]
     fn restore_new_draft(
         &mut self,
         thread_id: ThreadId,
@@ -2616,6 +2593,7 @@ impl AgentPanel {
         );
     }
 
+    #[allow(dead_code)]
     fn restore_terminal_for_panel_load(
         &mut self,
         metadata: TerminalThreadMetadata,
