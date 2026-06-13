@@ -1910,6 +1910,15 @@ impl AgentPanel {
     }
 
     pub fn new_text_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.new_text_thread_inner(true, window, cx);
+    }
+
+    fn new_text_thread_inner(
+        &mut self,
+        focus: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(text_thread_store) = self.text_thread_store.clone() else {
             return;
         };
@@ -1941,11 +1950,13 @@ impl AgentPanel {
                 window,
                 cx,
             ),
-            true,
+            focus,
             window,
             cx,
         );
-        text_thread_editor.focus_handle(cx).focus(window, cx);
+        if focus {
+            text_thread_editor.focus_handle(cx).focus(window, cx);
+        }
     }
 
     pub(crate) fn open_saved_text_thread(
@@ -5313,29 +5324,10 @@ impl Panel for AgentPanel {
 impl AgentPanel {
     fn ensure_thread_initialized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.base_view, BaseView::Uninitialized) {
-            if self.pending_terminal_spawn.is_some() {
-                return;
-            }
-            if self.should_create_terminal_for_new_entry(cx) {
-                let terminal_id = TerminalId::new();
-                self.pending_terminal_spawn = Some(terminal_id);
-                cx.defer_in(window, move |this, window, cx| {
-                    if matches!(this.base_view, BaseView::Uninitialized)
-                        && this.pending_terminal_spawn == Some(terminal_id)
-                        && this.should_create_terminal_for_new_entry(cx)
-                    {
-                        this.create_initial_terminal(
-                            terminal_id,
-                            AgentThreadSource::AgentPanel,
-                            window,
-                            cx,
-                        );
-                    } else if this.pending_terminal_spawn == Some(terminal_id) {
-                        this.pending_terminal_spawn = None;
-                    }
-                });
-            } else {
-                self.activate_draft(false, AgentThreadSource::AgentPanel, window, cx);
+            // The panel hosts only text threads, so open a fresh text thread
+            // instead of an agentic draft when first activated.
+            if self.text_thread_store.is_some() && self.has_open_project(cx) {
+                self.new_text_thread_inner(false, window, cx);
             }
         }
     }
