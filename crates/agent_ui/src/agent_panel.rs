@@ -5332,6 +5332,9 @@ impl AgentPanel {
         }
     }
 
+    // Unused now that the panel opens directly into a text thread; retained
+    // for the agent-thread/terminal path that Phase 3 cleanup may revisit.
+    #[allow(dead_code)]
     fn create_initial_terminal(
         &mut self,
         terminal_id: TerminalId,
@@ -5350,6 +5353,7 @@ impl AgentPanel {
     }
 
     #[cfg(not(test))]
+    #[allow(dead_code)]
     fn spawn_initial_terminal(
         &mut self,
         terminal_id: TerminalId,
@@ -5373,6 +5377,7 @@ impl AgentPanel {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     fn spawn_initial_terminal(
         &mut self,
         terminal_id: TerminalId,
