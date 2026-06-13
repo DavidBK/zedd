@@ -138,6 +138,9 @@ impl MentionSet {
             MentionUri::Fetch { url } => self.confirm_mention_for_fetch(url, http_client, cx),
             MentionUri::Directory { .. } => Task::ready(Ok(Mention::Link)),
             MentionUri::Thread { id, .. } => self.confirm_mention_for_thread(id, cx),
+            MentionUri::TextThread { .. } => {
+                Task::ready(Err(anyhow!("Text thread mentions are no longer supported")))
+            }
             MentionUri::File { abs_path } => {
                 self.confirm_mention_for_file(abs_path, supports_images, cx)
             }
@@ -312,6 +315,9 @@ impl MentionSet {
             }
             MentionUri::Directory { .. } => Task::ready(Ok(Mention::Link)),
             MentionUri::Thread { id, .. } => self.confirm_mention_for_thread(id, cx),
+            MentionUri::TextThread { .. } => {
+                Task::ready(Err(anyhow!("Text thread mentions are no longer supported")))
+            }
             MentionUri::File { abs_path } => {
                 self.confirm_mention_for_file(abs_path, supports_images, cx)
             }

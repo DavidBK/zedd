@@ -57,11 +57,20 @@ use crate::{
 };
 use crate::{
     Agent, AgentInitialContent, AgentThreadSource, ExternalSourcePrompt, NewExternalAgentThread,
-    NewNativeAgentThreadFromSummary,
+    NewNativeAgentThreadFromSummary, NewTextThread, OpenHistory,
+    text_thread_editor::{AgentPanelDelegate, TextThreadEditor, make_lsp_adapter_delegate},
+    text_thread_history::{TextThreadHistory, TextThreadHistoryEvent},
 };
+use assistant_slash_command::SlashCommandWorkingSet;
+use assistant_text_thread::{TextThread, TextThreadEvent, TextThreadStore};
+use editor::EditorEvent;
+use prompt_store::PromptBuilder;
+use search::{BufferSearchBar, buffer_search};
+use std::ops::Range;
+use std::path::Path;
 use agent_settings::AgentSettings;
 use ai_onboarding::AgentPanelOnboarding;
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Result, anyhow};
 #[cfg(feature = "audio")]
 use audio::{Audio, Sound};
 use chrono::{DateTime, Utc};
@@ -97,7 +106,7 @@ use ui::{
 use util::ResultExt as _;
 use workspace::{
     CollaboratorId, DraggedSelection, DraggedTab, MultiWorkspace, PathList, SerializedPathList,
-    ToggleWorkspaceSidebar, ToggleZoom, Workspace, WorkspaceId,
+    ToggleWorkspaceSidebar, ToggleZoom, ToolbarItemView as _, Workspace, WorkspaceId,
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
 };
@@ -390,6 +399,18 @@ pub fn init(cx: &mut App) {
                             )
                         });
                         workspace.focus_panel::<AgentPanel>(window, cx);
+                    }
+                })
+                .register_action(|workspace, _: &NewTextThread, window, cx| {
+                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                        panel.update(cx, |panel, cx| panel.new_text_thread(window, cx));
+                        workspace.focus_panel::<AgentPanel>(window, cx);
+                    }
+                })
+                .register_action(|workspace, _: &OpenHistory, window, cx| {
+                    if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                        workspace.focus_panel::<AgentPanel>(window, cx);
+                        panel.update(cx, |panel, cx| panel.open_text_thread_history(window, cx));
                     }
                 })
                 .register_action(
@@ -1097,6 +1118,12 @@ enum BaseView {
     AgentThread {
         conversation_view: Entity<ConversationView>,
     },
+    TextThread {
+        text_thread_editor: Entity<TextThreadEditor>,
+        title_editor: Entity<Editor>,
+        buffer_search_bar: Entity<BufferSearchBar>,
+        _subscriptions: Vec<gpui::Subscription>,
+    },
     Terminal {
         terminal_id: TerminalId,
     },
@@ -1112,17 +1139,24 @@ impl From<AgentThread> for BaseView {
 
 enum OverlayView {
     Configuration,
+    TextThreadHistory,
 }
 
 enum VisibleSurface<'a> {
     Uninitialized,
     AgentThread(&'a Entity<ConversationView>),
+    TextThread {
+        text_thread_editor: &'a Entity<TextThreadEditor>,
+        buffer_search_bar: &'a Entity<BufferSearchBar>,
+    },
+    TextThreadHistory(&'a Entity<TextThreadHistory>),
     Terminal(&'a Entity<TerminalView>),
     Configuration(Option<&'a Entity<AgentConfiguration>>),
 }
 
 enum WhichFontSize {
     AgentFont,
+    BufferFont,
     None,
 }
 
@@ -1130,7 +1164,97 @@ impl BaseView {
     pub fn which_font_size_used(&self) -> WhichFontSize {
         match self {
             BaseView::AgentThread { .. } => WhichFontSize::AgentFont,
+            BaseView::TextThread { .. } => WhichFontSize::BufferFont,
             BaseView::Terminal { .. } | BaseView::Uninitialized => WhichFontSize::None,
+        }
+    }
+}
+
+impl BaseView {
+    pub fn text_thread(
+        text_thread_editor: Entity<TextThreadEditor>,
+        language_registry: Arc<LanguageRegistry>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let title = text_thread_editor.read(cx).title(cx).to_string();
+
+        let editor = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_text(title, window, cx);
+            editor
+        });
+
+        // This is a workaround for `editor.set_text` emitting a `BufferEdited` event, which would
+        // cause a custom summary to be set. The presence of this custom summary would cause
+        // summarization to not happen.
+        let mut suppress_first_edit = true;
+
+        let subscriptions = vec![
+            window.subscribe(&editor, cx, {
+                {
+                    let text_thread_editor = text_thread_editor.clone();
+                    move |editor, event, window, cx| match event {
+                        EditorEvent::BufferEdited => {
+                            if suppress_first_edit {
+                                suppress_first_edit = false;
+                                return;
+                            }
+                            let new_summary = editor.read(cx).text(cx);
+
+                            text_thread_editor.update(cx, |text_thread_editor, cx| {
+                                text_thread_editor
+                                    .text_thread()
+                                    .update(cx, |text_thread, cx| {
+                                        text_thread.set_custom_summary(new_summary, cx);
+                                    })
+                            })
+                        }
+                        EditorEvent::Blurred => {
+                            if editor.read(cx).text(cx).is_empty() {
+                                let summary = text_thread_editor
+                                    .read(cx)
+                                    .text_thread()
+                                    .read(cx)
+                                    .summary()
+                                    .or_default();
+
+                                editor.update(cx, |editor, cx| {
+                                    editor.set_text(summary, window, cx);
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }),
+            window.subscribe(&text_thread_editor.read(cx).text_thread().clone(), cx, {
+                let editor = editor.clone();
+                move |text_thread, event, window, cx| match event {
+                    TextThreadEvent::SummaryGenerated => {
+                        let summary = text_thread.read(cx).summary().or_default();
+
+                        editor.update(cx, |editor, cx| {
+                            editor.set_text(summary, window, cx);
+                        })
+                    }
+                    TextThreadEvent::PathChanged { .. } => {}
+                    _ => {}
+                }
+            }),
+        ];
+
+        let buffer_search_bar =
+            cx.new(|cx| BufferSearchBar::new(Some(language_registry), window, cx));
+        buffer_search_bar.update(cx, |buffer_search_bar, cx| {
+            buffer_search_bar.set_active_pane_item(Some(&text_thread_editor), window, cx)
+        });
+
+        Self::TextThread {
+            text_thread_editor,
+            title_editor: editor,
+            buffer_search_bar,
+            _subscriptions: subscriptions,
         }
     }
 }
@@ -1138,7 +1262,7 @@ impl BaseView {
 impl OverlayView {
     pub fn which_font_size_used(&self) -> WhichFontSize {
         match self {
-            OverlayView::Configuration => WhichFontSize::None,
+            OverlayView::Configuration | OverlayView::TextThreadHistory => WhichFontSize::None,
         }
     }
 }
@@ -1152,6 +1276,8 @@ pub struct AgentPanel {
     fs: Arc<dyn Fs>,
     language_registry: Arc<LanguageRegistry>,
     thread_store: Entity<ThreadStore>,
+    text_thread_store: Option<Entity<TextThreadStore>>,
+    text_thread_history: Option<Entity<TextThreadHistory>>,
     connection_store: Entity<AgentConnectionStore>,
     context_server_registry: Entity<ContextServerRegistry>,
     configuration: Option<Entity<AgentConfiguration>>,
@@ -1270,10 +1396,19 @@ impl AgentPanel {
 
     pub fn load(
         workspace: WeakEntity<Workspace>,
+        prompt_builder: Arc<PromptBuilder>,
         mut cx: AsyncWindowContext,
     ) -> Task<Result<Entity<Self>>> {
         let kvp = cx.update(|_window, cx| KeyValueStore::global(cx)).ok();
         cx.spawn(async move |cx| {
+            let slash_commands = Arc::new(SlashCommandWorkingSet::default());
+            let text_thread_store = workspace
+                .update(cx, |workspace, cx| {
+                    let project = workspace.project().clone();
+                    TextThreadStore::new(project, prompt_builder, slash_commands, cx)
+                })?
+                .await?;
+
             let workspace_id = workspace
                 .read_with(cx, |workspace, _| workspace.database_id())
                 .ok()
@@ -1398,7 +1533,8 @@ impl AgentPanel {
             };
 
             let panel = workspace.update_in(cx, |workspace, window, cx| {
-                let panel = cx.new(|cx| Self::new(workspace, window, cx));
+                let panel =
+                    cx.new(|cx| Self::new_with_text_threads(workspace, text_thread_store, window, cx));
 
                 panel.update(cx, |panel, cx| {
                     let is_via_collab = panel.project.read(cx).is_via_collab();
@@ -1476,6 +1612,32 @@ impl AgentPanel {
 
             Ok(panel)
         })
+    }
+
+    pub(crate) fn new_with_text_threads(
+        workspace: &Workspace,
+        text_thread_store: Entity<TextThreadStore>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(workspace, window, cx);
+
+        let text_thread_history =
+            cx.new(|cx| TextThreadHistory::new(text_thread_store.clone(), window, cx));
+        cx.subscribe_in(
+            &text_thread_history,
+            window,
+            |this, _, event, window, cx| match event {
+                TextThreadHistoryEvent::Open(thread) => this
+                    .open_saved_text_thread(thread.path.clone(), window, cx)
+                    .detach_and_log_err(cx),
+            },
+        )
+        .detach();
+
+        this.text_thread_store = Some(text_thread_store);
+        this.text_thread_history = Some(text_thread_history);
+        this
     }
 
     pub(crate) fn new(workspace: &Workspace, _window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -1578,6 +1740,8 @@ impl AgentPanel {
             pending_serialization: None,
             new_user_onboarding: onboarding,
             thread_store,
+            text_thread_store: None,
+            text_thread_history: None,
             selected_agent: Agent::default(),
             _thread_view_subscription: None,
             _active_thread_focus_subscription: None,
@@ -1743,6 +1907,117 @@ impl AgentPanel {
         self.serialize(cx);
         cx.emit(AgentPanelEvent::ActiveViewChanged);
         cx.notify();
+    }
+
+    pub fn new_text_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text_thread_store) = self.text_thread_store.clone() else {
+            return;
+        };
+        telemetry::event!("Agent Thread Started", agent = "zed-text");
+
+        let context = text_thread_store.update(cx, |context_store, cx| context_store.create(cx));
+        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project, cx)
+            .log_err()
+            .flatten();
+
+        let text_thread_editor = cx.new(|cx| {
+            let mut editor = TextThreadEditor::for_text_thread(
+                context,
+                self.fs.clone(),
+                self.workspace.clone(),
+                self.project.clone(),
+                lsp_adapter_delegate,
+                window,
+                cx,
+            );
+            editor.insert_default_prompt(window, cx);
+            editor
+        });
+
+        self.set_base_view(
+            BaseView::text_thread(
+                text_thread_editor.clone(),
+                self.language_registry.clone(),
+                window,
+                cx,
+            ),
+            true,
+            window,
+            cx,
+        );
+        text_thread_editor.focus_handle(cx).focus(window, cx);
+    }
+
+    pub(crate) fn open_saved_text_thread(
+        &mut self,
+        path: Arc<Path>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<()>> {
+        let Some(text_thread_store) = self.text_thread_store.clone() else {
+            return Task::ready(Err(anyhow!("text thread store is not available")));
+        };
+        let text_thread_task =
+            text_thread_store.update(cx, |store, cx| store.open_local(path, cx));
+        cx.spawn_in(window, async move |this, cx| {
+            let text_thread = text_thread_task.await?;
+            this.update_in(cx, |this, window, cx| {
+                this.open_text_thread(text_thread, window, cx);
+            })
+        })
+    }
+
+    pub(crate) fn open_text_thread(
+        &mut self,
+        text_thread: Entity<TextThread>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let lsp_adapter_delegate = make_lsp_adapter_delegate(&self.project.clone(), cx)
+            .log_err()
+            .flatten();
+        let editor = cx.new(|cx| {
+            TextThreadEditor::for_text_thread(
+                text_thread,
+                self.fs.clone(),
+                self.workspace.clone(),
+                self.project.clone(),
+                lsp_adapter_delegate,
+                window,
+                cx,
+            )
+        });
+
+        self.set_base_view(
+            BaseView::text_thread(editor.clone(), self.language_registry.clone(), window, cx),
+            true,
+            window,
+            cx,
+        );
+        editor.focus_handle(cx).focus(window, cx);
+    }
+
+    pub fn active_text_thread_editor(&self) -> Option<Entity<TextThreadEditor>> {
+        match &self.base_view {
+            BaseView::TextThread {
+                text_thread_editor, ..
+            } => Some(text_thread_editor.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn open_text_thread_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_thread_history.is_none() {
+            return;
+        }
+        if matches!(self.overlay_view, Some(OverlayView::TextThreadHistory)) {
+            self.clear_overlay(true, window, cx);
+            return;
+        }
+        self.set_overlay(OverlayView::TextThreadHistory, true, window, cx);
+        if let Some(history) = self.text_thread_history.as_ref() {
+            history.focus_handle(cx).focus(window, cx);
+        }
     }
 
     pub fn new_thread(&mut self, _action: &NewThread, window: &mut Window, cx: &mut Context<Self>) {
@@ -3516,6 +3791,12 @@ impl AgentPanel {
                     theme_settings::adjust_agent_buffer_font_size(cx, |size| size + delta);
                 }
             }
+            WhichFontSize::BufferFont => {
+                // The text thread editor uses the buffer font size, so allow
+                // the action to propagate to the default handler that changes
+                // that font size.
+                cx.propagate();
+            }
             WhichFontSize::None => {
                 // The agent panel does not own this font size (e.g. when a
                 // terminal is the visible surface). Let the action bubble up
@@ -3544,9 +3825,9 @@ impl AgentPanel {
                     theme_settings::reset_agent_buffer_font_size(cx);
                 }
             }
-            WhichFontSize::None => {
+            WhichFontSize::BufferFont | WhichFontSize::None => {
                 // Let the workspace handler reset the global buffer font size
-                // that the terminal uses.
+                // that the terminal and text thread editor use.
                 cx.propagate();
             }
         }
@@ -4252,6 +4533,18 @@ impl AgentPanel {
                 }
                 None
             }
+            BaseView::TextThread {
+                text_thread_editor, ..
+            } => {
+                self._thread_view_subscription = None;
+                let focus_handle = text_thread_editor.focus_handle(cx);
+                self._active_thread_focus_subscription =
+                    Some(cx.on_focus_in(&focus_handle, window, |_this, _window, cx| {
+                        cx.emit(AgentPanelEvent::ActiveViewFocused);
+                        cx.notify();
+                    }));
+                None
+            }
             BaseView::Uninitialized => {
                 self._thread_view_subscription = None;
                 self._active_thread_focus_subscription = None;
@@ -4267,6 +4560,10 @@ impl AgentPanel {
                 OverlayView::Configuration => {
                     VisibleSurface::Configuration(self.configuration.as_ref())
                 }
+                OverlayView::TextThreadHistory => match self.text_thread_history.as_ref() {
+                    Some(history) => VisibleSurface::TextThreadHistory(history),
+                    None => VisibleSurface::Uninitialized,
+                },
             };
         }
 
@@ -4275,6 +4572,14 @@ impl AgentPanel {
             BaseView::AgentThread { conversation_view } => {
                 VisibleSurface::AgentThread(conversation_view)
             }
+            BaseView::TextThread {
+                text_thread_editor,
+                buffer_search_bar,
+                ..
+            } => VisibleSurface::TextThread {
+                text_thread_editor,
+                buffer_search_bar,
+            },
             BaseView::Terminal { terminal_id } => self
                 .terminals
                 .get(terminal_id)
@@ -4860,6 +5165,10 @@ impl Focusable for AgentPanel {
         match self.visible_surface() {
             VisibleSurface::Uninitialized => self.focus_handle.clone(),
             VisibleSurface::AgentThread(conversation_view) => conversation_view.focus_handle(cx),
+            VisibleSurface::TextThread {
+                text_thread_editor, ..
+            } => text_thread_editor.focus_handle(cx),
+            VisibleSurface::TextThreadHistory(history) => history.focus_handle(cx),
             VisibleSurface::Terminal(terminal_view) => terminal_view.focus_handle(cx),
             VisibleSurface::Configuration(configuration) => {
                 if let Some(configuration) = configuration {
@@ -5110,7 +5419,7 @@ impl AgentPanel {
 
         match &self.base_view {
             BaseView::Uninitialized => false,
-            BaseView::Terminal { .. } => true,
+            BaseView::Terminal { .. } | BaseView::TextThread { .. } => true,
             BaseView::AgentThread { conversation_view } => {
                 let has_entries = conversation_view
                     .read(cx)
@@ -5385,6 +5694,16 @@ impl AgentPanel {
                     Label::new("Terminal").into_any_element()
                 }
             }
+            VisibleSurface::TextThread { .. } => {
+                if let BaseView::TextThread { title_editor, .. } = &self.base_view {
+                    div().flex_1().child(title_editor.clone()).into_any_element()
+                } else {
+                    Label::new("Text Thread").truncate().into_any_element()
+                }
+            }
+            VisibleSurface::TextThreadHistory(_) => {
+                Label::new("Text Thread History").truncate().into_any_element()
+            }
             VisibleSurface::Configuration(_) => {
                 Label::new("Settings").truncate().into_any_element()
             }
@@ -5634,6 +5953,7 @@ impl AgentPanel {
                         }
 
                         menu = menu
+                            .action("Text Thread History", Box::new(OpenHistory))
                             .action("Settings", Box::new(OpenSettings))
                             .separator()
                             .action("Toggle Threads Sidebar", Box::new(ToggleWorkspaceSidebar));
@@ -5714,7 +6034,9 @@ impl AgentPanel {
             BaseView::AgentThread { conversation_view } => {
                 conversation_view.read(cx).as_native_thread(cx)
             }
-            BaseView::Terminal { .. } | BaseView::Uninitialized => None,
+            BaseView::TextThread { .. } | BaseView::Terminal { .. } | BaseView::Uninitialized => {
+                None
+            }
         };
 
         let new_thread_menu_builder: Rc<
@@ -6116,7 +6438,7 @@ impl AgentPanel {
                     return false;
                 }
             }
-            BaseView::Terminal { .. } | BaseView::Uninitialized => {
+            BaseView::TextThread { .. } | BaseView::Terminal { .. } | BaseView::Uninitialized => {
                 return false;
             }
         }
@@ -6168,7 +6490,9 @@ impl AgentPanel {
             });
 
         match &self.base_view {
-            BaseView::Uninitialized | BaseView::Terminal { .. } => false,
+            BaseView::Uninitialized | BaseView::Terminal { .. } | BaseView::TextThread { .. } => {
+                false
+            }
             BaseView::AgentThread { conversation_view } => {
                 if conversation_view.read(cx).as_native_thread(cx).is_some() {
                     let history_is_empty = ThreadStore::global(cx).read(cx).is_empty();
@@ -6344,6 +6668,19 @@ impl AgentPanel {
                     conversation_view.insert_dragged_files(paths, added_worktrees, window, cx);
                 });
             }
+            BaseView::TextThread {
+                text_thread_editor, ..
+            } => {
+                text_thread_editor.update(cx, |text_thread_editor, cx| {
+                    TextThreadEditor::insert_dragged_files(
+                        text_thread_editor,
+                        paths,
+                        added_worktrees,
+                        window,
+                        cx,
+                    );
+                });
+            }
             BaseView::Terminal { terminal_id } => {
                 let paths = {
                     let project = self.project.read(cx);
@@ -6374,7 +6711,52 @@ impl AgentPanel {
     fn key_context(&self) -> KeyContext {
         let mut key_context = KeyContext::new_with_defaults();
         key_context.add("AgentPanel");
+        match &self.base_view {
+            BaseView::AgentThread { .. } => key_context.add("acp_thread"),
+            BaseView::TextThread { .. } => key_context.add("text_thread"),
+            BaseView::Terminal { .. } | BaseView::Uninitialized => {}
+        }
         key_context
+    }
+
+    fn render_text_thread(
+        &self,
+        text_thread_editor: &Entity<TextThreadEditor>,
+        buffer_search_bar: &Entity<BufferSearchBar>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut registrar = buffer_search::DivRegistrar::new(
+            |this, _, _cx| match &this.base_view {
+                BaseView::TextThread {
+                    buffer_search_bar, ..
+                } => Some(buffer_search_bar.clone()),
+                _ => None,
+            },
+            cx,
+        );
+        BufferSearchBar::register(&mut registrar);
+        registrar
+            .into_div()
+            .size_full()
+            .relative()
+            .map(|parent| {
+                buffer_search_bar.update(cx, |buffer_search_bar, cx| {
+                    if buffer_search_bar.is_dismissed() {
+                        return parent;
+                    }
+                    parent.child(
+                        div()
+                            .p(DynamicSpacing::Base08.rems(cx))
+                            .border_b_1()
+                            .border_color(cx.theme().colors().border_variant)
+                            .bg(cx.theme().colors().editor_background)
+                            .child(buffer_search_bar.render(window, cx)),
+                    )
+                })
+            })
+            .child(text_thread_editor.clone())
+            .child(self.render_drag_target(cx))
     }
 }
 
@@ -6401,6 +6783,12 @@ impl Render for AgentPanel {
             .on_action(cx.listener(|this, _: &NewTerminalThread, window, cx| {
                 cx.stop_propagation();
                 this.new_terminal(None, AgentThreadSource::AgentPanel, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewTextThread, window, cx| {
+                this.new_text_thread(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &OpenHistory, window, cx| {
+                this.open_text_thread_history(window, cx);
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.open_configuration(window, cx);
@@ -6437,6 +6825,20 @@ impl Render for AgentPanel {
                 VisibleSurface::AgentThread(conversation_view) => parent
                     .child(conversation_view.clone())
                     .child(self.render_drag_target(cx)),
+                VisibleSurface::TextThread {
+                    text_thread_editor,
+                    buffer_search_bar,
+                } => {
+                    let text_thread_editor = text_thread_editor.clone();
+                    let buffer_search_bar = buffer_search_bar.clone();
+                    parent.child(self.render_text_thread(
+                        &text_thread_editor,
+                        &buffer_search_bar,
+                        window,
+                        cx,
+                    ))
+                }
+                VisibleSurface::TextThreadHistory(history) => parent.child(history.clone()),
                 VisibleSurface::Terminal(terminal_view) => parent
                     .child(terminal_view.clone())
                     .child(self.render_drag_target(cx)),
@@ -6455,6 +6857,114 @@ impl Render for AgentPanel {
             }
             _ => content.into_any(),
         }
+    }
+}
+
+pub struct ConcreteAssistantPanelDelegate;
+
+impl AgentPanelDelegate for ConcreteAssistantPanelDelegate {
+    fn active_text_thread_editor(
+        &self,
+        workspace: &mut Workspace,
+        _window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) -> Option<Entity<TextThreadEditor>> {
+        let panel = workspace.panel::<AgentPanel>(cx)?;
+        panel.read(cx).active_text_thread_editor()
+    }
+
+    fn open_local_text_thread(
+        &self,
+        workspace: &mut Workspace,
+        path: Arc<Path>,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) -> Task<Result<()>> {
+        let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+            return Task::ready(Err(anyhow!("Agent panel not found")));
+        };
+
+        panel.update(cx, |panel, cx| {
+            panel.open_saved_text_thread(path, window, cx)
+        })
+    }
+
+    fn open_remote_text_thread(
+        &self,
+        _workspace: &mut Workspace,
+        _text_thread_id: assistant_text_thread::TextThreadId,
+        _window: &mut Window,
+        _cx: &mut Context<Workspace>,
+    ) -> Task<Result<Entity<TextThreadEditor>>> {
+        Task::ready(Err(anyhow!("opening remote context not implemented")))
+    }
+
+    fn quote_selection(
+        &self,
+        workspace: &mut Workspace,
+        selection_ranges: Vec<Range<editor::Anchor>>,
+        buffer: Entity<MultiBuffer>,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+            return;
+        };
+
+        if !panel.focus_handle(cx).contains_focused(window, cx) {
+            workspace.toggle_panel_focus::<AgentPanel>(window, cx);
+        }
+
+        panel.update(cx, |_, cx| {
+            // Wait to create a new context until the workspace is no longer
+            // being updated.
+            cx.defer_in(window, move |panel, window, cx| {
+                if let Some(text_thread_editor) = panel.active_text_thread_editor() {
+                    use multi_buffer::ToPoint as _;
+                    let snapshot = buffer.read(cx).snapshot(cx);
+                    let selection_ranges = selection_ranges
+                        .into_iter()
+                        .map(|range| range.start.to_point(&snapshot)..range.end.to_point(&snapshot))
+                        .collect::<Vec<_>>();
+
+                    text_thread_editor.update(cx, |text_thread_editor, cx| {
+                        text_thread_editor.quote_ranges(selection_ranges, snapshot, window, cx)
+                    });
+                }
+            });
+        });
+    }
+
+    fn quote_terminal_text(
+        &self,
+        workspace: &mut Workspace,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        let Some(panel) = workspace.panel::<AgentPanel>(cx) else {
+            return;
+        };
+
+        if !panel.focus_handle(cx).contains_focused(window, cx) {
+            workspace.toggle_panel_focus::<AgentPanel>(window, cx);
+        }
+
+        panel.update(cx, |_, cx| {
+            // Wait to create a new context until the workspace is no longer
+            // being updated.
+            cx.defer_in(window, move |panel, window, cx| {
+                if let Some(conversation_view) = panel.active_conversation_view() {
+                    conversation_view.update(cx, |conversation_view, cx| {
+                        conversation_view.insert_terminal_text(text, window, cx);
+                    });
+                } else if let Some(text_thread_editor) = panel.active_text_thread_editor() {
+                    text_thread_editor.update(cx, |text_thread_editor, cx| {
+                        text_thread_editor.quote_terminal_text(text, window, cx)
+                    });
+                }
+            });
+        });
     }
 }
 

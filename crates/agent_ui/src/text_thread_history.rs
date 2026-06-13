@@ -116,9 +116,6 @@ impl TextThreadHistory {
         this
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.visible_items.is_empty()
-    }
 
     fn update_visible_items(&mut self, preserve_selected_item: bool, cx: &mut Context<Self>) {
         let entries = self.text_thread_store.update(cx, |store, _| {
@@ -521,7 +518,7 @@ impl Render for TextThreadHistory {
                     .id("list-container")
                     .relative()
                     .overflow_hidden()
-                    .flex_grow();
+                    .flex_grow(1.);
 
                 if has_no_history {
                     view.justify_center().items_center().child(
@@ -545,7 +542,7 @@ impl Render for TextThreadHistory {
                         .p_1()
                         .pr_4()
                         .track_scroll(&self.scroll_handle)
-                        .flex_grow(),
+                        .flex_grow(1.),
                     )
                     .vertical_scrollbar_for(&self.scroll_handle, window, cx)
                 }

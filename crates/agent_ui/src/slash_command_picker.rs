@@ -337,8 +337,8 @@ where
         PopoverMenu::new("model-switcher")
             .menu(move |_window, _cx| Some(picker_view.clone()))
             .trigger_with_tooltip(self.trigger, self.tooltip)
-            .attach(gpui::Corner::TopLeft)
-            .anchor(gpui::Corner::BottomLeft)
+            .attach(gpui::Anchor::TopLeft)
+            .anchor(gpui::Anchor::BottomLeft)
             .offset(gpui::Point {
                 x: px(0.0),
                 y: px(-2.0),
