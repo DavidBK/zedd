@@ -1025,6 +1025,8 @@
     "default_width": 640,
     // Default height when the agent panel is docked to the bottom.
     "default_height": 320,
+    // The view to use by default (thread, or text_thread)
+    "default_view": "thread",
     // Whether to limit the content width in the agent panel. When enabled,
     // content will be constrained to `max_content_width` and centered when
     // the panel is wider, for optimal readability.
@@ -1684,7 +1686,7 @@
   "load_direnv": "direct",
   "edit_predictions": {
     // Which edit prediction provider to use.
-    "provider": "zed",
+    "provider": "copilot",
     // A list of globs representing files that edit predictions should be disabled for.
     // There's a sensible default list of globs already included.
     // Any addition to this list will be merged with the default list.
@@ -1714,13 +1716,13 @@
     //   "enterprise_uri": "",
     //   "proxy": "",
     //   "proxy_no_verify": false
-    //   "enable_next_edit_suggestions": true
+    //   "enable_next_edit_suggestions": false
     // },
     "copilot": {
       "enterprise_uri": null,
       "proxy": null,
       "proxy_no_verify": null,
-      "enable_next_edit_suggestions": true,
+      "enable_next_edit_suggestions": false,
     },
     "codestral": {
       "api_url": "https://codestral.mistral.ai",
@@ -1747,6 +1749,9 @@
     //   - "yes": allow data collection for files in open-source projects.
     //   - "no": never allow data collection.
     "allow_data_collection": "default",
+    // Whether edit predictions are enabled when editing text threads in the agent panel.
+    // This setting has no effect if globally disabled.
+    "enabled_in_text_threads": true,
   },
   // Settings specific to journaling
   "journal": {

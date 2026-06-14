@@ -482,6 +482,9 @@ pub struct EditPredictionSettings {
     /// `Default` means the value stored in the legacy KV store is used as a fallback,
     /// preserving existing users' choices without a migration.
     pub allow_data_collection: EditPredictionDataCollectionChoice,
+    /// Whether edit predictions are enabled in the assistant panel.
+    /// This setting has no effect if globally disabled.
+    pub enabled_in_text_threads: bool,
 }
 
 impl EditPredictionSettings {
@@ -873,6 +876,8 @@ impl settings::Settings for AllLanguageSettings {
                 prompt_format: openai_compatible_settings.prompt_format.unwrap().into(),
             });
 
+        let enabled_in_text_threads = edit_predictions.enabled_in_text_threads.unwrap();
+
         let mut file_types: FxHashMap<Arc<str>, (GlobSet, Vec<String>)> = FxHashMap::default();
 
         for (language, patterns) in all_languages.file_types.iter().flatten() {
@@ -911,6 +916,7 @@ impl settings::Settings for AllLanguageSettings {
                 ollama: ollama_settings,
                 open_ai_compatible_api: openai_compatible_settings,
                 allow_data_collection: edit_predictions.allow_data_collection.unwrap_or_default(),
+                enabled_in_text_threads,
             },
             defaults: default_language_settings,
             languages,

@@ -4357,10 +4357,12 @@ impl ThreadView {
             }
         };
 
-        let used = crate::humanize_token_count(usage.used_tokens);
-        let max = crate::humanize_token_count(usage.max_tokens);
-        let input_tokens_label = crate::humanize_token_count(usage.input_tokens);
-        let output_tokens_label = crate::humanize_token_count(usage.output_tokens);
+        let used = crate::text_thread_editor::humanize_token_count(usage.used_tokens);
+        let max = crate::text_thread_editor::humanize_token_count(usage.max_tokens);
+        let input_tokens_label =
+            crate::text_thread_editor::humanize_token_count(usage.input_tokens);
+        let output_tokens_label =
+            crate::text_thread_editor::humanize_token_count(usage.output_tokens);
 
         let progress_ratio = if usage.max_tokens > 0 {
             usage.used_tokens as f32 / usage.max_tokens as f32
@@ -4401,9 +4403,10 @@ impl ThreadView {
             .and_then(|thread| thread.read(cx).model())
             .and_then(|model| model.max_output_tokens())
             .unwrap_or(0);
-        let input_max_label =
-            crate::humanize_token_count(usage.max_tokens.saturating_sub(max_output_tokens));
-        let output_max_label = crate::humanize_token_count(max_output_tokens);
+        let input_max_label = crate::text_thread_editor::humanize_token_count(
+            usage.max_tokens.saturating_sub(max_output_tokens),
+        );
+        let output_max_label = crate::text_thread_editor::humanize_token_count(max_output_tokens);
 
         let build_tooltip = {
             move |_window: &mut Window, cx: &mut App| {
@@ -6010,9 +6013,12 @@ impl ThreadView {
                     .last_turn_tokens
                     .filter(|&tokens| tokens > TOKEN_THRESHOLD)
                     .map(|tokens| {
-                        Label::new(format!("{} tokens", crate::humanize_token_count(tokens)))
-                            .size(LabelSize::Small)
-                            .color(Color::Muted)
+                        Label::new(format!(
+                            "{} tokens",
+                            crate::text_thread_editor::humanize_token_count(tokens)
+                        ))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
                     })
             })
             .flatten();
@@ -6369,7 +6375,7 @@ impl ThreadView {
                 self.turn_fields
                     .turn_tokens
                     .filter(|&tokens| tokens > TOKEN_THRESHOLD)
-                    .map(|tokens| crate::humanize_token_count(tokens))
+                    .map(|tokens| crate::text_thread_editor::humanize_token_count(tokens))
             })
             .flatten();
 
@@ -10852,6 +10858,15 @@ pub(crate) fn open_link(
                 if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                     panel.update(cx, |panel, cx| {
                         panel.open_thread(id, None, Some(name.into()), window, cx)
+                    });
+                }
+            }
+            MentionUri::TextThread { path, .. } => {
+                if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
+                    panel.update(cx, |panel, cx| {
+                        panel
+                            .open_saved_text_thread(path.as_path().into(), window, cx)
+                            .detach_and_log_err(cx);
                     });
                 }
             }

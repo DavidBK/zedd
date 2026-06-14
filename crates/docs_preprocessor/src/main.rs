@@ -565,9 +565,9 @@ fn template_and_validate_json_snippets(book: &mut Book, errors: &mut HashSet<Pre
 /// This will return the action name unmodified.
 ///
 /// ```
-/// let action_as_str = "workspace::Save";
+/// let action_as_str = "assistant::Assist";
 /// let action_name = name_for_action(action_as_str);
-/// assert_eq!(action_name, "workspace::Save");
+/// assert_eq!(action_name, "assistant::Assist");
 /// ```
 ///
 /// This will return the action name with any trailing options removed.

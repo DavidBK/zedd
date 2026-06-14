@@ -710,7 +710,8 @@ fn main() {
         );
         agent_ui::init(
             app_state.fs.clone(),
-            prompt_builder,
+            app_state.client.clone(),
+            prompt_builder.clone(),
             app_state.languages.clone(),
             is_new_install,
             false,
@@ -865,7 +866,7 @@ fn main() {
             }
         }
 
-        initialize_workspace(app_state.clone(), cx);
+        initialize_workspace(app_state.clone(), prompt_builder, cx);
 
         cx.activate(true);
 
@@ -1530,13 +1531,7 @@ pub(crate) async fn restore_or_create_workspace(
                             cx,
                         )
                         .await?;
-                        workspace::apply_restored_multiworkspace_state(
-                            window,
-                            &state,
-                            app_state.fs.clone(),
-                            cx,
-                        )
-                        .await;
+                        workspace::apply_restored_multiworkspace_state(window, &state, cx).await;
                         Ok::<(), anyhow::Error>(())
                     }
                     .await

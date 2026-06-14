@@ -145,6 +145,9 @@ pub struct EditPredictionSettingsContent {
     /// - `"yes"`: allow data collection for files in open-source projects.
     /// - `"no"`: never allow data collection.
     pub allow_data_collection: Option<EditPredictionDataCollectionChoice>,
+    /// Whether edit predictions are enabled in the assistant prompt editor.
+    /// This has no effect if globally disabled.
+    pub enabled_in_text_threads: Option<bool>,
 }
 
 #[with_fallible_options]

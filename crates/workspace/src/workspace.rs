@@ -1119,23 +1119,6 @@ struct GlobalAppState(Arc<AppState>);
 
 impl Global for GlobalAppState {}
 
-/// Tracks worktree creation progress for the workspace.
-/// Read by the title bar to show a loading indicator on the worktree button.
-#[derive(Default)]
-pub struct ActiveWorktreeCreation {
-    pub label: Option<SharedString>,
-    pub is_switch: bool,
-}
-
-/// Captured workspace state used when switching between worktrees.
-/// Stores the layout and open files so they can be restored in the new workspace.
-pub struct PreviousWorkspaceState {
-    pub dock_structure: DockStructure,
-    pub open_file_paths: Vec<PathBuf>,
-    pub active_file_path: Option<PathBuf>,
-    pub focused_dock: Option<DockPosition>,
-}
-
 pub struct WorkspaceStore {
     workspaces: HashSet<(gpui::AnyWindowHandle, WeakEntity<Workspace>)>,
     client: Arc<Client>,
@@ -1296,7 +1279,6 @@ pub enum Event {
     ModalOpened,
     Activate,
     PanelAdded(AnyView),
-    WorktreeCreationChanged,
 }
 
 /// Controls which types of items should be made visible in the project panel
@@ -1419,7 +1401,6 @@ pub struct Workspace {
     /// use this instead of going through the `multi_workspace` field to avoid
     /// reading it as we might end up in a double lease otherwise.
     active_workspace_id: Option<Rc<Cell<EntityId>>>,
-    active_worktree_creation: ActiveWorktreeCreation,
     deferred_save_items: Vec<Box<dyn WeakItemHandle>>,
 }
 
@@ -1864,7 +1845,6 @@ impl Workspace {
             sidebar_focus_handle: None,
             multi_workspace,
             active_workspace_id: None,
-            active_worktree_creation: ActiveWorktreeCreation::default(),
             open_in_dev_container: false,
             _dev_container_task: None,
             deferred_save_items: Vec::new(),
@@ -2265,49 +2245,6 @@ impl Workspace {
             dock.read(cx).is_open() && dock.focus_handle(cx).contains_focused(window, cx)
         })
         .map(|(position, _)| position)
-    }
-
-    pub fn active_worktree_creation(&self) -> &ActiveWorktreeCreation {
-        &self.active_worktree_creation
-    }
-
-    pub fn set_active_worktree_creation(
-        &mut self,
-        label: Option<SharedString>,
-        is_switch: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.active_worktree_creation.label = label;
-        self.active_worktree_creation.is_switch = is_switch;
-        cx.emit(Event::WorktreeCreationChanged);
-        cx.notify();
-    }
-
-    /// Captures the current workspace state for restoring after a worktree switch.
-    /// This includes dock layout, open file paths, and the active file path.
-    pub fn capture_state_for_worktree_switch(
-        &self,
-        window: &Window,
-        fallback_focused_dock: Option<DockPosition>,
-        cx: &App,
-    ) -> PreviousWorkspaceState {
-        let dock_structure = self.capture_dock_state(window, cx);
-        let open_file_paths = self.open_item_abs_paths(cx);
-        let active_file_path = self
-            .active_item(cx)
-            .and_then(|item| item.project_path(cx))
-            .and_then(|pp| self.project().read(cx).absolute_path(&pp, cx));
-
-        let focused_dock = self
-            .focused_dock_position(window, cx)
-            .or(fallback_focused_dock);
-
-        PreviousWorkspaceState {
-            dock_structure,
-            open_file_paths,
-            active_file_path,
-            focused_dock,
-        }
     }
 
     pub fn open_item_abs_paths(&self, cx: &App) -> Vec<PathBuf> {
@@ -9290,7 +9227,7 @@ pub async fn restore_multiworkspace(
         }
     };
 
-    apply_restored_multiworkspace_state(window_handle, &state, app_state.fs.clone(), cx).await;
+    apply_restored_multiworkspace_state(window_handle, &state, cx).await;
 
     window_handle
         .update(cx, |_, window, _cx| {
@@ -9304,7 +9241,6 @@ pub async fn restore_multiworkspace(
 pub async fn apply_restored_multiworkspace_state(
     window_handle: WindowHandle<MultiWorkspace>,
     state: &MultiWorkspaceState,
-    fs: Arc<dyn fs::Fs>,
     cx: &mut AsyncApp,
 ) {
     let MultiWorkspaceState {
@@ -9315,38 +9251,20 @@ pub async fn apply_restored_multiworkspace_state(
     } = state;
 
     if !project_groups.is_empty() {
-        // Resolve linked worktree paths to their main repo paths so
-        // stale keys from previous sessions get normalized and deduped.
-        let mut resolved_groups: Vec<SerializedProjectGroupState> = Vec::new();
+        let mut restored_groups: Vec<SerializedProjectGroupState> = Vec::new();
         for serialized in project_groups.iter().cloned() {
             let SerializedProjectGroupState { key, expanded } = serialized.into_restored_state();
             if key.path_list().paths().is_empty() {
                 continue;
             }
-            let mut resolved_paths = Vec::new();
-            for path in key.path_list().paths() {
-                if key.host().is_none()
-                    && let Some(common_dir) =
-                        project::discover_root_repo_common_dir(path, fs.as_ref()).await
-                {
-                    let main_path = project::repo_identity_path(&common_dir);
-                    resolved_paths.push(main_path.to_path_buf());
-                } else {
-                    resolved_paths.push(path.to_path_buf());
-                }
-            }
-            let resolved = ProjectGroupKey::new(key.host(), PathList::new(&resolved_paths));
-            if !resolved_groups.iter().any(|g| g.key == resolved) {
-                resolved_groups.push(SerializedProjectGroupState {
-                    key: resolved,
-                    expanded,
-                });
+            if !restored_groups.iter().any(|group| group.key == key) {
+                restored_groups.push(SerializedProjectGroupState { key, expanded });
             }
         }
 
         window_handle
             .update(cx, |multi_workspace, _window, cx| {
-                multi_workspace.restore_project_groups(resolved_groups, cx);
+                multi_workspace.restore_project_groups(restored_groups, cx);
             })
             .ok();
     }

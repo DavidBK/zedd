@@ -67,6 +67,10 @@ pub fn init(cx: &mut App) {
                         ExtensionCategoryFilter::ContextServers => {
                             ExtensionProvides::ContextServers
                         }
+                        ExtensionCategoryFilter::SlashCommands => ExtensionProvides::SlashCommands,
+                        ExtensionCategoryFilter::IndexedDocsProviders => {
+                            ExtensionProvides::IndexedDocsProviders
+                        }
                         ExtensionCategoryFilter::Snippets => ExtensionProvides::Snippets,
                         ExtensionCategoryFilter::DebugAdapters => ExtensionProvides::DebugAdapters,
                     });

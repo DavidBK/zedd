@@ -213,8 +213,12 @@ impl InlineAssistant {
             return;
         }
 
-        let Some(inline_assist_target) = Self::resolve_inline_assist_target(workspace, window, cx)
-        else {
+        let Some(inline_assist_target) = Self::resolve_inline_assist_target(
+            workspace,
+            workspace.panel::<AgentPanel>(cx),
+            window,
+            cx,
+        ) else {
             return;
         };
 
@@ -1459,6 +1463,7 @@ impl InlineAssistant {
 
     fn resolve_inline_assist_target(
         workspace: &mut Workspace,
+        agent_panel: Option<Entity<AgentPanel>>,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<InlineAssistTarget> {
@@ -1476,7 +1481,20 @@ impl InlineAssistant {
             return Some(InlineAssistTarget::Terminal(terminal_view));
         }
 
-        if let Some(workspace_editor) = workspace
+        let text_thread_editor = agent_panel
+            .and_then(|panel| panel.read(cx).active_text_thread_editor())
+            .and_then(|editor| {
+                let editor = &editor.read(cx).editor().clone();
+                if editor.read(cx).is_focused(window) {
+                    Some(editor.clone())
+                } else {
+                    None
+                }
+            });
+
+        if let Some(text_thread_editor) = text_thread_editor {
+            Some(InlineAssistTarget::Editor(text_thread_editor))
+        } else if let Some(workspace_editor) = workspace
             .active_item(cx)
             .and_then(|item| item.act_as::<Editor>(cx))
         {

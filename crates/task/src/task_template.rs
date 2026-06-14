@@ -75,9 +75,6 @@ pub struct TaskTemplate {
     /// Which edited buffers to save before running the task.
     #[serde(default)]
     pub save: SaveStrategy,
-    /// Hooks that this task runs when emitted.
-    #[serde(default)]
-    pub hooks: HashSet<TaskHook>,
 }
 
 #[derive(Deserialize, Eq, PartialEq, Clone, Debug)]
@@ -87,14 +84,6 @@ pub enum DebugArgsRequest {
     Launch,
     /// Attach
     Attach(AttachRequest),
-}
-
-/// What to do with the terminal pane and tab, after the command was started.
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskHook {
-    #[serde(alias = "create_git_worktree")]
-    CreateWorktree,
 }
 
 /// What to do with the terminal pane and tab, after the command was started.

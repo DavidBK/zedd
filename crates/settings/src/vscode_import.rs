@@ -519,6 +519,7 @@ impl VsCodeSettings {
             context_servers: self.context_servers(),
             context_server_timeout: None,
             load_direnv: None,
+            slash_commands: None,
             git_hosting_providers: None,
             disable_ai: None,
         }

@@ -9,12 +9,11 @@ use crate::application_menu::{ApplicationMenu, show_menus};
 use crate::plan_chip::PlanChip;
 use agent_settings::{AgentSettings, WindowLayout};
 use arrayvec::ArrayVec;
-use git_ui::worktree_picker::WorktreePicker;
 pub use platform_title_bar::{
     self, DraggedWindowTab, MergeAllWindows, MoveTabToNewWindow, PlatformTitleBar,
     ShowNextWindowTab, ShowPreviousWindowTab,
 };
-use project::{linked_worktree_short_name, repo_identity_path};
+use project::repo_identity_path;
 
 #[cfg(not(target_os = "macos"))]
 use crate::application_menu::{
@@ -234,7 +233,6 @@ impl Render for TitleBar {
 
         let mut project_name = None;
         let mut repository = None;
-        let mut linked_worktree_name = None;
         if let Some(worktree) = self.effective_active_worktree(cx) {
             repository = self.get_repository_for_worktree(&worktree, cx);
             let worktree_abs_path = worktree.read(cx).abs_path();
@@ -245,20 +243,6 @@ impl Render for TitleBar {
                 .map(|name| SharedString::from(name.to_string()));
             if let Some(repo) = &repository {
                 let repo = repo.read(cx);
-                linked_worktree_name = repo
-                    .main_worktree_abs_path()
-                    .and_then(|main_worktree_path| {
-                        linked_worktree_short_name(
-                            main_worktree_path,
-                            repo.work_directory_abs_path.as_ref(),
-                        )
-                    })
-                    .or_else(|| {
-                        repo.is_linked_worktree()
-                            .then_some(project_name.clone())
-                            .flatten()
-                    });
-
                 let identity = repo_identity_path(&repo.common_dir_abs_path);
 
                 let display_name = if identity.extension() == Some(std::ffi::OsStr::new("git")) {
@@ -311,11 +295,8 @@ impl Render for TitleBar {
                                 .when_some(
                                     repository.filter(|_| is_git_enabled),
                                     |title_bar, repository| {
-                                        title_bar.children(self.render_worktree_and_branch(
-                                            repository,
-                                            linked_worktree_name,
-                                            cx,
-                                        ))
+                                        title_bar
+                                            .children(self.render_branch(repository, cx))
                                     },
                                 )
                         })
@@ -475,16 +456,6 @@ impl TitleBar {
             }),
         );
         subscriptions.push(cx.observe(&user_store, |_a, _, cx| cx.notify()));
-        if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
-            subscriptions.push(cx.subscribe(
-                &workspace_entity,
-                |_, _, event: &workspace::Event, cx| {
-                    if matches!(event, workspace::Event::WorktreeCreationChanged) {
-                        cx.notify();
-                    }
-                },
-            ));
-        }
         subscriptions.push(cx.observe_button_layout_changed(window, |_, _, cx| cx.notify()));
         if let Some(trusted_worktrees) = TrustedWorktrees::try_get_global(cx) {
             subscriptions.push(cx.subscribe(&trusted_worktrees, |_, _, _, cx| {
@@ -889,10 +860,9 @@ impl TitleBar {
             .anchor(gpui::Anchor::TopLeft)
     }
 
-    fn render_worktree_and_branch(
+    fn render_branch(
         &self,
         repository: Entity<project::git_store::Repository>,
-        linked_worktree_name: Option<SharedString>,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let workspace = self.workspace.upgrade()?;
@@ -936,63 +906,6 @@ impl TitleBar {
 
         let settings = TitleBarSettings::get_global(cx);
         let effective_repository = Some(repository);
-
-        let worktree_label: SharedString = linked_worktree_name.unwrap_or_else(|| "main".into());
-
-        let (creation_in_progress, is_switch) = self
-            .workspace
-            .upgrade()
-            .map(|ws| {
-                let creation = ws.read(cx).active_worktree_creation();
-                (creation.label.clone(), creation.is_switch)
-            })
-            .unwrap_or((None, false));
-        let is_creating = creation_in_progress.is_some();
-
-        let display_label: SharedString = if let Some(ref name) = creation_in_progress {
-            if is_switch {
-                format!("Loading {}…", name).into()
-            } else {
-                format!("Creating {}…", name).into()
-            }
-        } else {
-            worktree_label.clone()
-        };
-
-        let worktree_button = {
-            let project = self.project.clone();
-            let workspace_handle = workspace.downgrade();
-            PopoverMenu::new("worktree-picker-menu")
-                .menu(move |window, cx| {
-                    // When opened from the title bar, focus is on the trigger
-                    // button (not a dock), so `focused_dock` is `None`. That's
-                    // fine — there's no prior dock focus to restore.
-                    Some(cx.new(|cx| {
-                        WorktreePicker::new(project.clone(), workspace_handle.clone(), window, cx)
-                    }))
-                })
-                .trigger_with_tooltip(
-                    Button::new("worktree_picker_trigger", display_label)
-                        .selected_style(ButtonStyle::Tinted(TintColor::Accent))
-                        .label_size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .loading(is_creating)
-                        .start_icon(
-                            Icon::new(IconName::GitWorktree)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        ),
-                    move |_window, cx| {
-                        Tooltip::with_meta(
-                            "Worktree",
-                            Some(&zed_actions::git::Worktree),
-                            format!("Currently In Use: {}", worktree_label),
-                            cx,
-                        )
-                    },
-                )
-                .anchor(gpui::Anchor::TopLeft)
-        };
 
         let branch_picker = branch_name.and_then(|branch_name| {
             settings.show_branch_name.then(|| {
@@ -1052,21 +965,7 @@ impl TitleBar {
             })
         });
 
-        Some(
-            h_flex()
-                .gap_px()
-                .child(worktree_button)
-                .when_some(branch_picker, |this, branch_picker| {
-                    this.child(
-                        Label::new("/")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted)
-                            .alpha(0.25),
-                    )
-                    .child(branch_picker)
-                })
-                .into_any_element(),
-        )
+        Some(h_flex().gap_px().children(branch_picker).into_any_element())
     }
 
     fn window_activation_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {

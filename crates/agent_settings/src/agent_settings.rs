@@ -16,7 +16,7 @@ use project::DisableAiSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{
-    DockPosition, DockSide, LanguageModelParameters, LanguageModelSelection,
+    DefaultAgentView, DockPosition, DockSide, LanguageModelParameters, LanguageModelSelection,
     NotifyWhenAgentWaiting, PlaySoundWhenAgentDone, RegisterSetting, Settings, SettingsContent,
     SettingsStore, SidebarDockPosition, SidebarSide, ThinkingBlockDisplay, ToolPermissionMode,
     update_settings_file, update_settings_file_with_completion,
@@ -221,6 +221,7 @@ pub struct AgentSettings {
     pub inline_alternatives: Vec<LanguageModelSelection>,
     pub favorite_models: Vec<LanguageModelSelection>,
     pub default_profile: AgentProfileId,
+    pub default_view: DefaultAgentView,
     pub profiles: IndexMap<AgentProfileId, AgentProfileSettings>,
 
     pub notify_when_agent_waiting: NotifyWhenAgentWaiting,
@@ -738,6 +739,7 @@ impl Settings for AgentSettings {
             inline_alternatives: agent.inline_alternatives.unwrap_or_default(),
             favorite_models: agent.favorite_models,
             default_profile: AgentProfileId(agent.default_profile.unwrap()),
+            default_view: agent.default_view.unwrap(),
             profiles: agent
                 .profiles
                 .unwrap()

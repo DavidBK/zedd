@@ -8,7 +8,7 @@ use language::{BinaryStatus, LanguageMatcher, LanguageName, LoadedLanguage};
 use lsp::LanguageServerName;
 use parking_lot::RwLock;
 
-use crate::Extension;
+use crate::{Extension, SlashCommand};
 
 #[derive(Default)]
 struct GlobalExtensionHostProxy(Arc<ExtensionHostProxy>);
@@ -29,6 +29,7 @@ pub struct ExtensionHostProxy {
     language_proxy: RwLock<Option<Arc<dyn ExtensionLanguageProxy>>>,
     language_server_proxy: RwLock<Option<Arc<dyn ExtensionLanguageServerProxy>>>,
     snippet_proxy: RwLock<Option<Arc<dyn ExtensionSnippetProxy>>>,
+    slash_command_proxy: RwLock<Option<Arc<dyn ExtensionSlashCommandProxy>>>,
     context_server_proxy: RwLock<Option<Arc<dyn ExtensionContextServerProxy>>>,
     debug_adapter_provider_proxy: RwLock<Option<Arc<dyn ExtensionDebugAdapterProviderProxy>>>,
     language_model_provider_proxy: RwLock<Option<Arc<dyn ExtensionLanguageModelProviderProxy>>>,
@@ -54,6 +55,7 @@ impl ExtensionHostProxy {
             language_proxy: RwLock::default(),
             language_server_proxy: RwLock::default(),
             snippet_proxy: RwLock::default(),
+            slash_command_proxy: RwLock::default(),
             context_server_proxy: RwLock::default(),
             debug_adapter_provider_proxy: RwLock::default(),
             language_model_provider_proxy: RwLock::default(),
@@ -78,6 +80,10 @@ impl ExtensionHostProxy {
 
     pub fn register_snippet_proxy(&self, proxy: impl ExtensionSnippetProxy) {
         self.snippet_proxy.write().replace(Arc::new(proxy));
+    }
+
+    pub fn register_slash_command_proxy(&self, proxy: impl ExtensionSlashCommandProxy) {
+        self.slash_command_proxy.write().replace(Arc::new(proxy));
     }
 
     pub fn register_context_server_proxy(&self, proxy: impl ExtensionContextServerProxy) {
@@ -347,6 +353,30 @@ impl ExtensionSnippetProxy for ExtensionHostProxy {
         };
 
         proxy.register_snippet(path, snippet_contents)
+    }
+}
+
+pub trait ExtensionSlashCommandProxy: Send + Sync + 'static {
+    fn register_slash_command(&self, extension: Arc<dyn Extension>, command: SlashCommand);
+
+    fn unregister_slash_command(&self, command_name: Arc<str>);
+}
+
+impl ExtensionSlashCommandProxy for ExtensionHostProxy {
+    fn register_slash_command(&self, extension: Arc<dyn Extension>, command: SlashCommand) {
+        let Some(proxy) = self.slash_command_proxy.read().clone() else {
+            return;
+        };
+
+        proxy.register_slash_command(extension, command)
+    }
+
+    fn unregister_slash_command(&self, command_name: Arc<str>) {
+        let Some(proxy) = self.slash_command_proxy.read().clone() else {
+            return;
+        };
+
+        proxy.unregister_slash_command(command_name)
     }
 }
 

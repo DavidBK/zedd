@@ -21,7 +21,7 @@ use lsp::{LanguageServerId, LanguageServerName};
 use paths::{debug_task_file_name, task_file_name};
 use settings::{InvalidSettingsError, parse_json_with_comments};
 use task::{
-    DebugScenario, ResolvedTask, SharedTaskContext, TaskContext, TaskHook, TaskId, TaskTemplate,
+    DebugScenario, ResolvedTask, SharedTaskContext, TaskContext, TaskId, TaskTemplate,
     TaskTemplates, TaskVariables, VariableName,
 };
 use text::{BufferId, Point, ToPoint};
@@ -713,19 +713,6 @@ impl Inventory {
                     .resolve_task(&id_base, task_context)
                     .map(|resolved_task| (task_source_kind, resolved_task))
             })
-            .collect()
-    }
-
-    /// Returns all task templates (worktree and global) that have at least one
-    /// hook in the provided set.
-    pub fn templates_with_hooks(
-        &self,
-        hooks: &HashSet<TaskHook>,
-        worktree: WorktreeId,
-    ) -> Vec<(TaskSourceKind, TaskTemplate)> {
-        self.worktree_templates_from_settings(worktree)
-            .chain(self.global_templates_from_settings())
-            .filter(|(_, template)| !template.hooks.is_disjoint(hooks))
             .collect()
     }
 

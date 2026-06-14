@@ -23,7 +23,6 @@ mod go_locator {
             show_summary: true,
             show_command: true,
             save: SaveStrategy::default(),
-            hooks: Default::default(),
         };
 
         let scenario = locator
@@ -52,7 +51,6 @@ mod go_locator {
             show_summary: true,
             show_command: true,
             save: SaveStrategy::default(),
-            hooks: Default::default(),
         };
 
         let scenario = locator
@@ -192,7 +190,6 @@ mod go_locator {
             show_summary: true,
             show_command: true,
             save: SaveStrategy::default(),
-            hooks: Default::default(),
         };
 
         let scenario = locator
@@ -228,7 +225,6 @@ mod python_locator {
             show_summary: false,
             show_command: false,
             save: task::SaveStrategy::default(),
-            hooks: Default::default(),
         };
 
         let expected_scenario = DebugScenario {

@@ -194,6 +194,7 @@ fn open_mention_uri(
         MentionUri::Thread { id, name } => {
             open_thread(workspace, id, name, window, cx);
         }
+        MentionUri::TextThread { .. } => {}
         MentionUri::Skill {
             skill_file_path, ..
         } => {

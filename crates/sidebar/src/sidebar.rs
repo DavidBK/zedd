@@ -3505,7 +3505,10 @@ impl Sidebar {
         let metadata = metadata.clone();
         let mut async_window_cx = window.to_async(cx);
         cx.spawn(async move |_cx| {
-            let panel = AgentPanel::load(workspace.clone(), async_window_cx.clone()).await?;
+            let prompt_builder = std::sync::Arc::new(prompt_store::PromptBuilder::new(None)?);
+            let panel =
+                AgentPanel::load(workspace.clone(), prompt_builder, async_window_cx.clone())
+                    .await?;
 
             workspace.update_in(&mut async_window_cx, |workspace, window, cx| {
                 let panel = workspace.panel::<AgentPanel>(cx).unwrap_or_else(|| {
@@ -4359,7 +4362,10 @@ impl Sidebar {
         let metadata = metadata.clone();
         let mut async_window_cx = window.to_async(cx);
         cx.spawn(async move |_cx| {
-            let panel = AgentPanel::load(workspace.clone(), async_window_cx.clone()).await?;
+            let prompt_builder = std::sync::Arc::new(prompt_store::PromptBuilder::new(None)?);
+            let panel =
+                AgentPanel::load(workspace.clone(), prompt_builder, async_window_cx.clone())
+                    .await?;
 
             workspace.update_in(&mut async_window_cx, |workspace, window, cx| {
                 let panel = workspace.panel::<AgentPanel>(cx).unwrap_or_else(|| {
@@ -4533,40 +4539,16 @@ impl Sidebar {
 
     fn roots_to_archive_for_paths(
         &self,
-        folder_paths: &PathList,
-        remote_connection: Option<&RemoteConnectionOptions>,
-        except_thread_id: Option<ThreadId>,
-        except_terminal_id: Option<TerminalId>,
-        cx: &App,
+        _folder_paths: &PathList,
+        _remote_connection: Option<&RemoteConnectionOptions>,
+        _except_thread_id: Option<ThreadId>,
+        _except_terminal_id: Option<TerminalId>,
+        _cx: &App,
     ) -> Vec<thread_worktree_archive::RootPlan> {
-        let workspaces = self.archive_workspaces(cx);
-        folder_paths
-            .ordered_paths()
-            .filter_map(|path| {
-                thread_worktree_archive::build_root_plan(path, remote_connection, &workspaces, cx)
-            })
-            .filter(|plan| {
-                let store = ThreadMetadataStore::global(cx);
-                let store = store.read(cx);
-                !Self::path_is_referenced_by_unarchived_threads_for_archive(
-                    &store,
-                    except_thread_id,
-                    plan.root_path.as_path(),
-                    remote_connection,
-                    &workspaces,
-                    cx,
-                )
-            })
-            .filter(|root| {
-                TerminalThreadMetadataStore::try_global(cx).is_none_or(|terminal_store| {
-                    !terminal_store.read(cx).path_is_referenced_by_terminal(
-                        except_terminal_id,
-                        root.root_path.as_path(),
-                        remote_connection,
-                    )
-                })
-            })
-            .collect()
+        // Zed no longer manages git worktrees: archiving a thread must never
+        // persist or remove a worktree from disk. Restoring threads archived
+        // by older builds still works via `restore_worktree_via_git`.
+        Vec::new()
     }
 
     fn linked_worktree_workspace_to_remove(
